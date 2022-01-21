@@ -125,8 +125,8 @@ public class CalculateSkimMatricesRosenheim {
         String outputDirectory = "D:/code/equityRosenheim/skimCalculation/skims/ld_rail_with_walk";
         int numberOfPointsPerZone = 1;
         int numberOfThreads = 16;
-        String[] timesCarStr = {"08:00:00", "10:00:00" };
-        String[] timesPtStr = {"08:00:00", "10:00:00" };
+        String[] timesCarStr = {"08:00:00", "10:00:00"};
+        String[] timesPtStr = {"08:00:00", "10:00:00"};
         Set<String> modes = CollectionUtils.stringToSet("car,bus,rail");
 
         double[] timesCar = new double[timesCarStr.length];
@@ -151,13 +151,13 @@ public class CalculateSkimMatricesRosenheim {
         // alternative if you don't have facilities, use the network:
         // skims.calculateSamplingPointsPerZoneFromNetwork(networkFilename, numberOfPointsPerZone, zonesShapeFilename, zonesIdAttributeName, r);
 
-         //or load pre-calculated sampling points from an existing file:
-         skims.loadSamplingPointsFromFile("D:/code/equityRosenheim/skimCalculation/cluster_centroids_rosenheim.csv");
+        //or load pre-calculated sampling points from an existing file:
+        skims.loadSamplingPointsFromFile("D:/code/equityRosenheim/skimCalculation/cluster_centroids_rosenheim_31468.csv");
 
         PTSkimMatrices.PtIndicators<String> carMatrices = null;
         if (modes.contains(TransportMode.car)) {
             skims.calculateNetworkMatrices(networkFilename, eventsFilename, timesCar, config, l -> true);
-        //Todo write the car skim
+            //Todo write the car skim
         }
 
         PTSkimMatrices.PtIndicators<String> ptMatrices = null;
@@ -178,7 +178,7 @@ public class CalculateSkimMatricesRosenheim {
     }
 
     public final void calculateSamplingPointsPerZoneFromFacilities(String facilitiesFilename, int numberOfPointsPerZone, String zonesShapeFilename, String zonesIdAttributeName, Random r,
-            ToDoubleFunction<ActivityFacility> weightFunction) throws IOException {
+                                                                   ToDoubleFunction<ActivityFacility> weightFunction) throws IOException {
         // load facilities
         log.info("loading facilities from " + facilitiesFilename);
 
@@ -420,7 +420,7 @@ public class CalculateSkimMatricesRosenheim {
     }
 
     public final void calculateAndWritePTMatrices(String networkFilename, String transitScheduleFilename, double startTime, double endTime, Config config, String outputPrefix,
-            BiPredicate<TransitLine, TransitRoute> trainDetector) throws IOException {
+                                                  BiPredicate<TransitLine, TransitRoute> trainDetector) throws IOException {
 
         var matrices = calculatePTMatrices(networkFilename, transitScheduleFilename, startTime, endTime, config, trainDetector);
         writePTMatricesAsCSV(matrices, outputPrefix);
@@ -442,7 +442,7 @@ public class CalculateSkimMatricesRosenheim {
     }
 
     public final PTSkimMatrices.PtIndicators<String> calculatePTMatrices(String networkFilename, String transitScheduleFilename, double startTime, double endTime, Config config,
-            BiPredicate<TransitLine, TransitRoute> trainDetector) {
+                                                                         BiPredicate<TransitLine, TransitRoute> trainDetector) {
         Scenario scenario = ScenarioUtils.createScenario(config);
         log.info("loading schedule from " + transitScheduleFilename);
         new TransitScheduleReader(scenario).readFile(transitScheduleFilename);
