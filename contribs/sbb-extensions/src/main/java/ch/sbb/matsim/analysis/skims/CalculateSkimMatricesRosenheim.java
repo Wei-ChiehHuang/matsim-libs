@@ -117,12 +117,12 @@ public class CalculateSkimMatricesRosenheim {
         String zonesShapeFilename = "D:/code/equityRosenheim/skimCalculation/Zone/Zones3000_EPSG31468.shp";
         String zonesIdAttributeName = "Zone";
         String facilitiesFilename = null;
-        String networkFilename = "D:/code/equityRosenheim/skimCalculation/xml/mergedNetwork_20220119_wei.xml.gz";
-        String transitScheduleFilename = "D:/code/equityRosenheim/skimCalculation/xml/mapped_schedule_20220119_wei.xml";
+        String networkFilename = "D:/code/equityRosenheim/input/xml/mergedNetwork_20220119_wei.xml.gz";
+        String transitScheduleFilename = "D:/code/equityRosenheim/input/xml/mapped_schedule_20220119_wei.xml";
 
 
         String eventsFilename = null;
-        String outputDirectory = "D:/code/equityRosenheim/skimCalculation/skims/ld_rail_with_walk";
+        String outputDirectory = "D:/code/equityRosenheim/skimCalculation/skims/pt";
         int numberOfPointsPerZone = 1;
         int numberOfThreads = 16;
         String[] timesCarStr = {"08:00:00", "10:00:00"};
@@ -140,7 +140,7 @@ public class CalculateSkimMatricesRosenheim {
         }
 
         //Config config = ConfigUtils.createConfig();
-        Config config = ConfigUtils.loadConfig("D:/code/pt_germany/input/skimCalculatorConfig.xml");
+        Config config = ConfigUtils.loadConfig("D:/code/equityRosenheim/input/skimCalculatorConfig.xml");
         Random r = new Random(4711);
 
         CalculateSkimMatricesRosenheim skims = new CalculateSkimMatricesRosenheim(outputDirectory, numberOfThreads);
@@ -152,19 +152,18 @@ public class CalculateSkimMatricesRosenheim {
         // skims.calculateSamplingPointsPerZoneFromNetwork(networkFilename, numberOfPointsPerZone, zonesShapeFilename, zonesIdAttributeName, r);
 
         //or load pre-calculated sampling points from an existing file:
-        skims.loadSamplingPointsFromFile("D:/code/equityRosenheim/skimCalculation/cluster_centroids_rosenheim_31468.csv");
+        skims.loadSamplingPointsFromFile("D:/code/equityRosenheim/input/cluster_centroids_rosenheim_31468.csv");
 
-        PTSkimMatrices.PtIndicators<String> carMatrices = null;
         if (modes.contains(TransportMode.car)) {
             skims.calculateNetworkMatrices(networkFilename, eventsFilename, timesCar, config, l -> true);
             //Todo write the car skim
         }
 
-        PTSkimMatrices.PtIndicators<String> ptMatrices = null;
-        if (modes.contains(TransportMode.car)) {
-            ptMatrices = skims.calculatePTMatrices(networkFilename, transitScheduleFilename, timesPt[0], timesPt[1], config, (line, route) -> isRailOrBus(route));
-            skims.writePTMatricesAsCSV(ptMatrices, "");
-        }
+//        PTSkimMatrices.PtIndicators<String> ptMatrices = null;
+//        if (modes.contains(TransportMode.car)) {
+//            ptMatrices = skims.calculatePTMatrices(networkFilename, transitScheduleFilename, timesPt[0], timesPt[1], config, (line, route) -> isRailOrBus(route));
+//            skims.writePTMatricesAsCSV(ptMatrices, "");
+//        }
 
     }
 
@@ -339,7 +338,7 @@ public class CalculateSkimMatricesRosenheim {
 
     }
 
-    public final NetworkIndicators<String> calculateNetworkMatrices(String networkFilename, String eventsFilename, double[] times, Config config, Predicate<Link> xy2linksPredicate) {
+    public final NetworkIndicators<String> calculateNetworkMatrices(String networkFilename, String eventsFilename, double[] times, Config config, Predicate<Link> xy2linksPredicate) throws IOException {
         Scenario scenario = ScenarioUtils.createScenario(config);
         log.info("loading network from " + networkFilename);
         new MatsimNetworkReader(scenario.getNetwork()).readFile(networkFilename);
@@ -386,6 +385,9 @@ public class CalculateSkimMatricesRosenheim {
             netIndicators.travelTimeMatrix.multiply((float) (1.0 / times.length));
             netIndicators.distanceMatrix.multiply((float) (1.0 / times.length));
         }
+        FloatMatrixIO.writeAsCSV(netIndicators.travelTimeMatrix, outputDirectory + "/" + CAR_TRAVELTIMES_FILENAME);
+        FloatMatrixIO.writeAsCSV(netIndicators.distanceMatrix, outputDirectory + "/" + CAR_DISTANCES_FILENAME);
+
         return netIndicators;
     }
 
