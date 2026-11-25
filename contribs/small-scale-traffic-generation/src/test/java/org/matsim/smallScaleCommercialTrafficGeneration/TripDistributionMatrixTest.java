@@ -29,7 +29,9 @@ import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.core.gbl.MatsimRandom;
 import org.matsim.core.network.NetworkUtils;
-import org.matsim.smallScaleCommercialTrafficGeneration.TrafficVolumeGeneration.TrafficVolumeKey;
+import org.matsim.smallScaleCommercialTrafficGeneration.SmallScaleCommercialTrafficUtils.ZoneAttribute;
+import org.matsim.smallScaleCommercialTrafficGeneration.TrafficVolumesGenerator.StartOrStop;
+import org.matsim.smallScaleCommercialTrafficGeneration.TrafficVolumesGenerator.TrafficVolumeKey;
 import org.matsim.smallScaleCommercialTrafficGeneration.prepare.LanduseBuildingAnalysis;
 import org.matsim.smallScaleCommercialTrafficGeneration.prepare.LanduseDataConnectionCreatorForOSM_Data;
 import org.matsim.testcases.MatsimTestUtils;
@@ -53,8 +55,8 @@ public class TripDistributionMatrixTest {
 	@Test
 	void testTripDistributionCommercialPersonTrafficTraffic() throws IOException {
 
-		Map<String, List<String>> landuseCategoriesAndDataConnection = new LanduseDataConnectionCreatorForOSM_Data().createLanduseDataConnection();
-		Map<String, Map<String, List<SimpleFeature>>> buildingsPerZone = new HashMap<>();
+		Map<ZoneAttribute, List<String>> landuseCategoriesAndDataConnection = new LanduseDataConnectionCreatorForOSM_Data().createLanduseDataConnection();
+		Map<String, Map<ZoneAttribute, List<SimpleFeature>>> buildingsPerZone = new HashMap<>();
 
 		Path outputDataDistributionFile = Path.of(utils.getOutputDirectory()).resolve("dataDistributionPerZone.csv");
 		assert(new File(outputDataDistributionFile.getParent().resolve("calculatedData").toString()).mkdir());
@@ -66,23 +68,29 @@ public class TripDistributionMatrixTest {
 		String shapeFileBuildingTypeColumn = "type";
 		Path pathToInvestigationAreaData = Path.of(utils.getPackageInputDirectory()).resolve("investigationAreaData.csv");
 
-		Map<String, Object2DoubleMap<String>> resultingDataPerZone = LanduseBuildingAnalysis
+		Map<String, Object2DoubleMap<ZoneAttribute>> resultingDataPerZone = LanduseBuildingAnalysis
 				.createInputDataDistribution(outputDataDistributionFile, landuseCategoriesAndDataConnection,
 					usedLanduseConfiguration,
 					getIndexLanduse(inputDataDirectory), getZoneIndex(inputDataDirectory), getIndexBuildings(inputDataDirectory),
-					SCTUtils.getIndexRegions(inputDataDirectory), shapeFileZoneNameColumn, buildingsPerZone, pathToInvestigationAreaData, shapeFileBuildingTypeColumn);
+					getIndexRegions(inputDataDirectory), shapeFileZoneNameColumn, buildingsPerZone, pathToInvestigationAreaData, shapeFileBuildingTypeColumn);
 
-		GenerateSmallScaleCommercialTrafficDemand.SmallScaleCommercialTrafficType usedTrafficType = GenerateSmallScaleCommercialTrafficDemand.SmallScaleCommercialTrafficType.commercialPersonTraffic;
+		GenerateSmallScaleCommercialTrafficDemand.SmallScaleCommercialTrafficSegment usedTrafficType = GenerateSmallScaleCommercialTrafficDemand.SmallScaleCommercialTrafficSegment.commercialPersonTraffic;
 		double sample = 1.;
 		double resistanceFactor = 0.005;
 
 		List<String> modesORvehTypes = new ArrayList<>(List.of("total"));
-		TrafficVolumeGeneration.setInputParameters(usedTrafficType);
 
-		Map<TrafficVolumeKey, Object2DoubleMap<Integer>> trafficVolumePerTypeAndZone_start = TrafficVolumeGeneration
-				.createTrafficVolume_start(resultingDataPerZone, outputDataDistributionFile.getParent(), sample, modesORvehTypes, usedTrafficType);
-		Map<TrafficVolumeKey, Object2DoubleMap<Integer>> trafficVolumePerTypeAndZone_stop = TrafficVolumeGeneration
-				.createTrafficVolume_stop(resultingDataPerZone, outputDataDistributionFile.getParent(), sample, modesORvehTypes, usedTrafficType);
+//		TrafficVolumeGeneration.setInputParameters(usedTrafficType);
+		// is now done in the TrafficVolumeGeneration constructor below
+
+		final TrafficVolumesGenerator trafficVolumesGenerator = new TrafficVolumesGenerator( usedTrafficType );
+
+		Map<TrafficVolumeKey, Object2DoubleMap<Integer>> trafficVolumePerTypeAndZone_start = trafficVolumesGenerator.createTrafficVolumes(
+			resultingDataPerZone, outputDataDistributionFile.getParent(), sample, modesORvehTypes, usedTrafficType, StartOrStop.start
+		                                                                                                                                 );
+		Map<TrafficVolumeKey, Object2DoubleMap<Integer>> trafficVolumePerTypeAndZone_stop = trafficVolumesGenerator.createTrafficVolumes(
+			resultingDataPerZone, outputDataDistributionFile.getParent(), sample, modesORvehTypes, usedTrafficType, StartOrStop.stop
+		                                                                                                                                );
 		ArrayList<String> listOfZones = new ArrayList<>( List.of("area1", "area2", "area3"));
 		final TripDistributionMatrix odMatrix = TripDistributionMatrix.Builder
 				.newInstance(getZoneIndex(inputDataDirectory), shapeFileZoneNameColumn, trafficVolumePerTypeAndZone_start, trafficVolumePerTypeAndZone_stop, usedTrafficType,
@@ -100,9 +108,9 @@ public class TripDistributionMatrixTest {
 			for (String stopZone : resultingDataPerZone.keySet()) {
 				for (String modeORvehType : modesORvehTypes) {
 					for (Integer purpose : trafficVolumePerTypeAndZone_start
-							.get(TrafficVolumeGeneration.makeTrafficVolumeKey(startZone, modeORvehType)).keySet()) {
-						odMatrix.setTripDistributionValue(startZone, stopZone, modeORvehType, purpose, usedTrafficType,
-								network, regionLinksMap, resistanceFactor);
+								       .get( TrafficVolumesGenerator.makeTrafficVolumeKey(startZone, modeORvehType ) ).keySet()) {
+						odMatrix.calculateAndSetODFlow(startZone, stopZone, modeORvehType, purpose, usedTrafficType,
+								network, regionLinksMap, resistanceFactor );
 					}
 				}
 			}
@@ -127,14 +135,14 @@ public class TripDistributionMatrixTest {
 
 		for (String zone : resultingDataPerZone.keySet()) {
 			for (String modeORvehType : modesORvehTypes) {
-				TrafficVolumeKey key = TrafficVolumeGeneration.makeTrafficVolumeKey(zone, modeORvehType);
+				TrafficVolumeKey key = TrafficVolumesGenerator.makeTrafficVolumeKey(zone, modeORvehType );
 				for (Integer purpose : trafficVolumePerTypeAndZone_start
 						.get(key).keySet()) {
 					int generatedVolume = odMatrix.getSumOfServicesForStopZone(zone, modeORvehType, purpose,
 							usedTrafficType);
 					sumStopServices += generatedVolume;
 					sumStartServices += odMatrix.getSumOfServicesForStartZone(zone, modeORvehType, purpose,
-							usedTrafficType);
+							usedTrafficType, 1);
 					double planedVolume = trafficVolumePerTypeAndZone_stop.get(key).getDouble(purpose);
 					Assertions.assertEquals(planedVolume, generatedVolume, MatsimTestUtils.EPSILON);
 				}
@@ -147,8 +155,8 @@ public class TripDistributionMatrixTest {
 	@Test
 	void testTripDistributionGoodsTraffic() throws IOException {
 
-		Map<String, List<String>> landuseCategoriesAndDataConnection = new LanduseDataConnectionCreatorForOSM_Data().createLanduseDataConnection();
-		Map<String, Map<String, List<SimpleFeature>>> buildingsPerZone = new HashMap<>();
+		Map<ZoneAttribute, List<String>> landuseCategoriesAndDataConnection = new LanduseDataConnectionCreatorForOSM_Data().createLanduseDataConnection();
+		Map<String, Map<ZoneAttribute, List<SimpleFeature>>> buildingsPerZone = new HashMap<>();
 
 		Path outputDataDistributionFile = Path.of(utils.getOutputDirectory()).resolve("dataDistributionPerZone.csv");
 		assert(new File(outputDataDistributionFile.getParent().resolve("calculatedData").toString()).mkdir());
@@ -160,13 +168,13 @@ public class TripDistributionMatrixTest {
 		String shapeFileBuildingTypeColumn = "type";
 		Path pathToInvestigationAreaData = Path.of(utils.getPackageInputDirectory()).resolve("investigationAreaData.csv");
 
-		Map<String, Object2DoubleMap<String>> resultingDataPerZone = LanduseBuildingAnalysis
+		Map<String, Object2DoubleMap<ZoneAttribute>> resultingDataPerZone = LanduseBuildingAnalysis
 				.createInputDataDistribution(outputDataDistributionFile, landuseCategoriesAndDataConnection,
 					usedLanduseConfiguration,
 					getIndexLanduse(inputDataDirectory), getZoneIndex(inputDataDirectory), getIndexBuildings(inputDataDirectory),
-					SCTUtils.getIndexRegions(inputDataDirectory), shapeFileZoneNameColumn, buildingsPerZone, pathToInvestigationAreaData, shapeFileBuildingTypeColumn);
+					getIndexRegions(inputDataDirectory), shapeFileZoneNameColumn, buildingsPerZone, pathToInvestigationAreaData, shapeFileBuildingTypeColumn);
 
-		GenerateSmallScaleCommercialTrafficDemand.SmallScaleCommercialTrafficType usedTrafficType = GenerateSmallScaleCommercialTrafficDemand.SmallScaleCommercialTrafficType.goodsTraffic;
+		GenerateSmallScaleCommercialTrafficDemand.SmallScaleCommercialTrafficSegment usedTrafficType = GenerateSmallScaleCommercialTrafficDemand.SmallScaleCommercialTrafficSegment.goodsTraffic;
 		double sample = 1.;
 		double resistanceFactor = 0.005;
 
@@ -174,12 +182,17 @@ public class TripDistributionMatrixTest {
 			Arrays.asList("vehTyp1", "vehTyp2", "vehTyp3", "vehTyp4", "vehTyp5"));
 		ArrayList<String> listOfZones = new ArrayList<>( List.of("area1", "area2", "area3"));
 
-		TrafficVolumeGeneration.setInputParameters(usedTrafficType);
+//		TrafficVolumeGeneration.setInputParameters(usedTrafficType);
+		// is now done in the TrafficVolumeGeneration constructor below
 
-		Map<TrafficVolumeKey, Object2DoubleMap<Integer>> trafficVolumePerTypeAndZone_start = TrafficVolumeGeneration
-				.createTrafficVolume_start(resultingDataPerZone, outputDataDistributionFile.getParent(), sample, modesORvehTypes, usedTrafficType);
-		Map<TrafficVolumeKey, Object2DoubleMap<Integer>> trafficVolumePerTypeAndZone_stop = TrafficVolumeGeneration
-				.createTrafficVolume_stop(resultingDataPerZone, outputDataDistributionFile.getParent(), sample, modesORvehTypes, usedTrafficType);
+		final TrafficVolumesGenerator trafficVolumesGenerator = new TrafficVolumesGenerator( usedTrafficType );
+
+		Map<TrafficVolumeKey, Object2DoubleMap<Integer>> trafficVolumePerTypeAndZone_start = trafficVolumesGenerator.createTrafficVolumes(
+			resultingDataPerZone, outputDataDistributionFile.getParent(), sample, (List<String>) modesORvehTypes, usedTrafficType, StartOrStop.start
+		                                                                                                                                 );
+		Map<TrafficVolumeKey, Object2DoubleMap<Integer>> trafficVolumePerTypeAndZone_stop = trafficVolumesGenerator.createTrafficVolumes(
+			resultingDataPerZone, outputDataDistributionFile.getParent(), sample, (List<String>) modesORvehTypes, usedTrafficType, StartOrStop.stop
+		                                                                                                                                );
 		final TripDistributionMatrix odMatrix = TripDistributionMatrix.Builder
 				.newInstance(getZoneIndex(inputDataDirectory), shapeFileZoneNameColumn, trafficVolumePerTypeAndZone_start, trafficVolumePerTypeAndZone_stop, usedTrafficType,
                         listOfZones).build();
@@ -196,9 +209,9 @@ public class TripDistributionMatrixTest {
 			for (String stopZone : resultingDataPerZone.keySet()) {
 				for (String modeORvehType : modesORvehTypes) {
 					for (Integer purpose : trafficVolumePerTypeAndZone_start
-							.get(TrafficVolumeGeneration.makeTrafficVolumeKey(startZone, modeORvehType)).keySet()) {
-						odMatrix.setTripDistributionValue(startZone, stopZone, modeORvehType, purpose, usedTrafficType,
-								network, regionLinksMap, resistanceFactor);
+								       .get( TrafficVolumesGenerator.makeTrafficVolumeKey(startZone, modeORvehType ) ).keySet()) {
+						odMatrix.calculateAndSetODFlow(startZone, stopZone, modeORvehType, purpose, usedTrafficType,
+								network, regionLinksMap, resistanceFactor );
 					}
 				}
 			}
@@ -224,14 +237,14 @@ public class TripDistributionMatrixTest {
 
 		for (String zone : resultingDataPerZone.keySet()) {
 			for (String modeORvehType : modesORvehTypes) {
-				TrafficVolumeKey key = TrafficVolumeGeneration.makeTrafficVolumeKey(zone, modeORvehType);
+				TrafficVolumeKey key = TrafficVolumesGenerator.makeTrafficVolumeKey(zone, modeORvehType );
 				for (Integer purpose : trafficVolumePerTypeAndZone_start
 						.get(key).keySet()) {
 					int generatedVolume = odMatrix.getSumOfServicesForStopZone(zone, modeORvehType, purpose,
 							usedTrafficType);
 					sumStopServices += generatedVolume;
 					sumStartServices += odMatrix.getSumOfServicesForStartZone(zone, modeORvehType, purpose,
-							usedTrafficType);
+							usedTrafficType, 1);
 					double planedVolume = trafficVolumePerTypeAndZone_stop.get(key).getDouble(purpose);
 					Assertions.assertEquals(planedVolume, generatedVolume, MatsimTestUtils.EPSILON);
 				}

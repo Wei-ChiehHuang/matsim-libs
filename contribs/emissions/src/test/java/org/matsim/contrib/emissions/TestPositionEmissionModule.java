@@ -96,10 +96,10 @@ public class TestPositionEmissionModule {
 
         final ScoringConfigGroup.ActivityParams homeParams = new ScoringConfigGroup.ActivityParams("home")
                 .setTypicalDuration(20);
-        config.scoring().addActivityParams(homeParams);
+        config.scoring().addDefaultActivityParams(homeParams);
         final ScoringConfigGroup.ActivityParams workParams = new ScoringConfigGroup.ActivityParams("work")
                 .setTypicalDuration(20);
-        config.scoring().addActivityParams(workParams);
+        config.scoring().addDefaultActivityParams(workParams);
 
         var strategy = new ReplanningConfigGroup.StrategySettings();
         strategy.setStrategyName("ChangeExpBeta");
@@ -127,9 +127,9 @@ public class TestPositionEmissionModule {
         scenario.getVehicles().addVehicle(vehicle);
         var person = createPerson(scenario.getPopulation().getFactory());
         scenario.getPopulation().addPerson(person);
-        VehicleUtils.insertVehicleIdsIntoAttributes(person, Map.of(vehicle.getType().getNetworkMode(), vehicle.getId()));
+		VehicleUtils.insertVehicleIdsIntoPersonAttributes( person, Map.of(vehicle.getType().getNetworkMode(), vehicle.getId() ) );
 
-        var controler = new Controler(scenario);
+		var controler = new Controler(scenario);
 
         controler.addOverridingModule(new PositionEmissionsModule());
         // exclude last link since both emission calculations work slightly different for the last link of a trip.

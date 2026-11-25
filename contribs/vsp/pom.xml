@@ -3,7 +3,7 @@
 	<parent>
 		<groupId>org.matsim</groupId>
 		<artifactId>contrib</artifactId>
-		<version>2026.0-SNAPSHOT</version>
+		<version>2027.0-SNAPSHOT</version>
 	</parent>
 
 	<modelVersion>4.0.0</modelVersion>
@@ -12,7 +12,7 @@
 	<name>vsp</name>
 
 	<properties>
-		<javafx.version>23.0.2</javafx.version>
+		<javafx.version>27</javafx.version>
 	</properties>
 
 	<repositories>
@@ -152,7 +152,7 @@
 		<dependency>
 			<groupId>org.apache.poi</groupId>
 			<artifactId>poi-ooxml</artifactId>
-			<version>5.4.1</version>
+			<version>5.5.1</version>
 			<exclusions>
 				<!-- needed to compile in IntelliJ with Eclipse compiler -->
 				<!-- see: https://bugs.eclipse.org/bugs/show_bug.cgi?id=536928 -->
@@ -191,7 +191,7 @@
 		<dependency>
 			<groupId>com.graphhopper</groupId>
 			<artifactId>graphhopper-core</artifactId>
-			<version>11.0</version>
+			<version>11.1</version>
 		</dependency>
 		<!-- Enforce version -->
 		<dependency>
@@ -206,6 +206,11 @@
 			<scope>test</scope>
 		</dependency>
 		<!-- Used undeclared dependencies -->
+		<dependency>
+			<groupId>org.matsim.contrib</groupId>
+			<artifactId>simwrapper</artifactId>
+			<version>${project.parent.version}</version>
+		</dependency>
 		<dependency>
 			<groupId>org.apache.commons</groupId>
 			<artifactId>commons-math</artifactId>
@@ -239,6 +244,7 @@
 		<dependency>
 			<groupId>com.google.inject</groupId>
 			<artifactId>guice</artifactId>
+			<classifier>classes</classifier>
 		</dependency>
 		<dependency>
 			<groupId>cadyts</groupId>
@@ -272,7 +278,7 @@
 		<dependency>
 			<groupId>one.util</groupId>
 			<artifactId>streamex</artifactId>
-			<version>0.8.4</version>
+			<version>0.9.0</version>
 		</dependency>
 		<dependency>
 			<groupId>org.geotools</groupId>
@@ -289,7 +295,7 @@
 		<dependency>
 			<groupId>com.graphhopper</groupId>
 			<artifactId>graphhopper-web-api</artifactId>
-			<version>11.0</version>
+			<version>11.1</version>
 		</dependency>
 		<dependency>
 			<groupId>org.locationtech.jts</groupId>
@@ -315,7 +321,6 @@
 		<dependency>
 			<groupId>com.sun.xml.bind</groupId>
 			<artifactId>jaxb-core</artifactId>
-			<version>4.0.6</version>
 		</dependency>
 		<dependency>
 			<groupId>org.matsim.contrib</groupId>
@@ -330,7 +335,17 @@
 		<dependency>
 			<groupId>org.jetbrains</groupId>
 			<artifactId>annotations</artifactId>
-			<version>26.0.2-1</version>
+			<version>26.1.0</version>
+		</dependency>
+		<dependency>
+			<groupId>tech.tablesaw</groupId>
+			<artifactId>tablesaw-jsplot</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.matsim.contrib</groupId>
+			<artifactId>drt-extensions</artifactId>
+			<version>2027.0-SNAPSHOT</version>
+			<scope>compile</scope>
 		</dependency>
 	</dependencies>
 </project>

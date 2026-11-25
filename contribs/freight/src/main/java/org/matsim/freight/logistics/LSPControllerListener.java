@@ -21,9 +21,6 @@
 package org.matsim.freight.logistics;
 
 import com.google.inject.Inject;
-import java.util.ArrayList;
-import java.util.List;
-
 import jakarta.annotation.Nullable;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
@@ -44,6 +41,11 @@ import org.matsim.freight.logistics.consistency_checkers.LogisticsConsistencyChe
 import org.matsim.freight.logistics.io.LSPPlanXmlWriter;
 import org.matsim.freight.logistics.shipment.LspShipment;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
 class LSPControllerListener
 	implements StartupListener, BeforeMobsimListener, AfterMobsimListener, ScoringListener, ReplanningListener, IterationStartsListener, IterationEndsListener, ShutdownListener {
 
@@ -52,14 +54,21 @@ class LSPControllerListener
 	private final List<EventHandler> registeredHandlers = new ArrayList<>();
 
 	private static int addListenerCnt = 0;
-	private  static final int maxAddListenerCnt = 1;
+	private static final int maxAddListenerCnt = 1;
 
-	@Inject private EventsManager eventsManager;
-	@Inject private MatsimServices matsimServices;
-	@Inject private LSPScorerFactory lspScoringFunctionFactory;
-	@Inject @Nullable private LSPStrategyManager strategyManager;
-	@Inject private OutputDirectoryHierarchy controlerIO;
-	@Inject private CarrierAgentTracker carrierAgentTracker;
+	@Inject
+	private EventsManager eventsManager;
+	@Inject
+	private MatsimServices matsimServices;
+	@Inject
+	private LSPScorerFactory lspScoringFunctionFactory;
+	@Inject
+	@Nullable
+	private LSPStrategyManager strategyManager;
+	@Inject
+	private OutputDirectoryHierarchy controlerIO;
+	@Inject
+	private CarrierAgentTracker carrierAgentTracker;
 
 
 	@Inject
@@ -72,7 +81,8 @@ class LSPControllerListener
 		LogisticsConsistencyChecker.CheckResult result = LogisticsConsistencyChecker.checkBeforePlanning(LSPUtils.getLSPs(scenario), Level.ERROR);
 		switch (result) {
 			case CHECK_SUCCESSFUL -> log.info("Consistency check of LSPs before planning was successful.");
-			case CHECK_FAILED -> throw new RuntimeException("Consistency check of LSPs failed. Please see the log file for more information. Aborting now....");
+			case CHECK_FAILED ->
+				throw new RuntimeException("Consistency check of LSPs failed. Please see the log file for more information. Aborting now....");
 			default -> throw new IllegalStateException("Unexpected value: " + result);
 		}
 	}
@@ -91,25 +101,33 @@ class LSPControllerListener
 			registerSimulationTrackers(lsp);
 
 			// simulation trackers of resources:
+			Set<LSPResource> registeredResources = new HashSet<>();
 			for (LSPResource resource : lsp.getResources()) {
 				registerSimulationTrackers(resource);
+				registeredResources.add(resource);
 			}
 
 			// simulation trackers of shipments:
 			for (LspShipment lspShipment : lsp.getLspShipments()) {
 				registerSimulationTrackers(lspShipment);
+				// The shipment log records what happens to the shipment in the mobsim of this iteration.  Entries from
+				// the previous iteration are removed, otherwise those that are not overwritten would remain.
+				lspShipment.getShipmentLog().clear();
 			}
 
-			// simulation trackers of solutions:
-			for (LogisticChain solution : lsp.getSelectedPlan().getLogisticChains()) {
-				registerSimulationTrackers(solution);
+			// simulation trackers of logistic chains:
+			for (LogisticChain chain : lsp.getSelectedPlan().getLogisticChains()) {
+				registerSimulationTrackers(chain);
 
-				// simulation trackers of solution elements:
-				for (LogisticChainElement element : solution.getLogisticChainElements()) {
+				// simulation trackers of logistic chain elements:
+				for (LogisticChainElement element : chain.getLogisticChainElements()) {
 					registerSimulationTrackers(element);
 
-					// simulation trackers of resources:
-					registerSimulationTrackers(element.getResource());
+					// Resources of the selected plan are not necessarily contained in lsp.getResources(), e.g. if the plan
+					// was set via setSelectedPlan. Only register those that were not registered above.
+					if (registeredResources.add(element.getResource())) {
+						registerSimulationTrackers(element.getResource());
+					}
 				}
 			}
 		}
@@ -126,7 +144,7 @@ class LSPControllerListener
 				registeredHandlers.add(simulationTracker);
 				matsimServices.addControllerListener(simulationTracker);
 				simulationTracker.setEventsManager(eventsManager);
-			} else if ( addListenerCnt < maxAddListenerCnt ){
+			} else if (addListenerCnt < maxAddListenerCnt) {
 				log.warn("not adding eventsHandler since already added: {}", simulationTracker);
 				addListenerCnt++;
 				if (addListenerCnt == maxAddListenerCnt) {
@@ -148,17 +166,14 @@ class LSPControllerListener
 		strategyManager.run(lsps.getLSPs().values(), event.getIteration(), event.getReplanningContext());
 
 		for (LSP lsp : lsps.getLSPs().values()) {
-			lsp.getSelectedPlan()
-				.getShipmentPlans()
-				.clear(); // clear ShipmentPlans to start with clear(n) state. Otherwise, some of the times were accumulating over the time. :(
+			// scheduleLogisticChains starts with removing the shipment plans of the selected plan and emptying the waiting shipments.
 			lsp.scheduleLogisticChains();
 		}
 
 		// Update carriers in scenario and CarrierAgentTracker
-		carrierAgentTracker.getCarriers().getCarriers().clear();
+		carrierAgentTracker.clearCarriers();
 		for (Carrier carrier : getCarriersFromLSP().getCarriers().values()) {
-			CarriersUtils.getCarriers(scenario).addCarrier(carrier);
-			carrierAgentTracker.getCarriers().addCarrier(carrier);
+			carrierAgentTracker.addCarrier(carrier);
 		}
 	}
 
@@ -171,7 +186,8 @@ class LSPControllerListener
 	}
 
 	@Override
-	public void notifyAfterMobsim(AfterMobsimEvent event) {}
+	public void notifyAfterMobsim(AfterMobsimEvent event) {
+	}
 
 	Carriers getCarriersFromLSP() {
 		LSPs lsps = LSPUtils.getLSPs(scenario);
@@ -180,8 +196,8 @@ class LSPControllerListener
 		Carriers carriers = new Carriers();
 		for (LSP lsp : lsps.getLSPs().values()) {
 			LSPPlan selectedPlan = lsp.getSelectedPlan();
-			for (LogisticChain solution : selectedPlan.getLogisticChains()) {
-				for (LogisticChainElement element : solution.getLogisticChainElements()) {
+			for (LogisticChain chain : selectedPlan.getLogisticChains()) {
+				for (LogisticChainElement element : chain.getLogisticChainElements()) {
 					if (element.getResource() instanceof LSPCarrierResource carrierResource) {
 						Carrier carrier = carrierResource.getCarrier();
 						if (!carriers.getCarriers().containsKey(carrier.getId())) {
@@ -202,7 +218,8 @@ class LSPControllerListener
 		LogisticsConsistencyChecker.CheckResult result = LogisticsConsistencyChecker.checkBeforePlanning(LSPUtils.getLSPs(scenario), Level.ERROR);
 		switch (result) {
 			case CHECK_SUCCESSFUL -> log.info("Consistency check of LSPs before planning was successful.");
-			case CHECK_FAILED -> throw new RuntimeException("Consistency check of LSPs failed. Please see the log file for more information. Aborting now....");
+			case CHECK_FAILED ->
+				throw new RuntimeException("Consistency check of LSPs failed. Please see the log file for more information. Aborting now....");
 			default -> throw new IllegalStateException("Unexpected value: " + result);
 		}
 	}
@@ -226,7 +243,7 @@ class LSPControllerListener
 	@Override
 	public void notifyShutdown(ShutdownEvent event) {
 		new LSPPlanXmlWriter(LSPUtils.getLSPs(scenario)).write(controlerIO.getOutputPath() + "/output_lsps.xml.gz");
-		CarriersUtils.writeCarriers(scenario,"output_carriers.xml.gz");
+		CarriersUtils.writeCarriers(scenario, "output_carriers.xml.gz");
 	}
 
 }

@@ -24,7 +24,7 @@ import static org.matsim.contrib.drt.schedule.DrtTaskBaseType.STOP;
  *
  * @author nkuehnel / MOIA
  */
-public class WaitForShiftTask extends DefaultStayTask implements DrtStopTask, OperationalStop, ETask {
+public class WaitForShiftTask extends DefaultStayTask implements DrtStopTask, FacilityStop, ETask {
 
 	public static final DrtTaskType TYPE = new DrtTaskType("WAIT_FOR_SHIFT", STOP);
 
@@ -84,6 +84,26 @@ public class WaitForShiftTask extends DefaultStayTask implements DrtStopTask, Op
     @Override
     public void removeDropoffRequest(Id<Request> requestId) {
         throw new RuntimeException("Not supported");
+    }
+
+    @Override
+    public double calcLatestArrivalTime() {
+        return Double.MAX_VALUE;
+    }
+
+    @Override
+    public double calcEarliestArrivalTime() {
+        return 0;
+    }
+
+    @Override
+    public double calcEarliestDepartureTime() {
+        return 0;
+    }
+
+    @Override
+    public double calcLatestDepartureTime() {
+        return Double.MAX_VALUE;
     }
 
     @Override

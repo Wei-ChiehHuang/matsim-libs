@@ -53,6 +53,7 @@ import org.matsim.api.core.v01.population.PlanElement;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
 import org.matsim.core.config.groups.PlansConfigGroup.ActivityDurationInterpretation;
+import org.matsim.core.config.groups.RoutingConfigGroup;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controler;
 import org.matsim.core.controler.events.IterationEndsEvent;
@@ -136,6 +137,10 @@ public class BetaTravelTest6IT {
 		ConfigUtils.loadConfig(config, utils.getInputDirectory() + "config.xml"); // specific setting for this test
 		config.controller().setWritePlansInterval(0);
 		config.plans().setActivityDurationInterpretation( ActivityDurationInterpretation.tryEndTimeThenDuration );
+		config.global().setRelativeToleranceForSampleSizeFactors( 5.1 );
+		//This is needed because the plans don't contain access/egress legs. The test would otherwise fail.
+		config.routing().setAccessEgressConsistencyCheck(RoutingConfigGroup.AccessEgressConsistencyCheck.disable);
+
 		/*
 		 * The input plans file is not sorted. After switching from TreeMap to LinkedHashMap
 		 * to store the persons in the population, we have to sort the population manually.
@@ -315,7 +320,7 @@ public class BetaTravelTest6IT {
 		@Override
 		public void notifyStartup(final StartupEvent event) {
             // do some test to ensure the scenario is correct
-			double beta_travel = event.getServices().getConfig().scoring().getModes().get(TransportMode.car).getMarginalUtilityOfTraveling();
+			double beta_travel = event.getServices().getConfig().scoring().getDefaultModeParams().get(TransportMode.car).getMarginalUtilityOfTraveling();
             if ((beta_travel != -6.0) && (beta_travel != -66.0)) {
                 throw new IllegalArgumentException("Unexpected value for beta_travel. Expected -6.0 or -66.0, actual value is " + beta_travel);
             }
@@ -358,7 +363,7 @@ public class BetaTravelTest6IT {
 				event.getServices().getEvents().removeHandler(this.ttAnalyzer);
 			}
 			if (iteration == 100) {
-				double beta_travel = event.getServices().getConfig().scoring().getModes().get(TransportMode.car).getMarginalUtilityOfTraveling();
+				double beta_travel = event.getServices().getConfig().scoring().getDefaultModeParams().get(TransportMode.car).getMarginalUtilityOfTraveling();
 				/* ***************************************************************
 				 * AUTOMATIC VERIFICATION OF THE TESTS:
 				 *

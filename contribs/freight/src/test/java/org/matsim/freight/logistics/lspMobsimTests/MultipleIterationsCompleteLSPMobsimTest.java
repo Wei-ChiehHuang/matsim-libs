@@ -36,6 +36,7 @@ import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
+import org.matsim.core.config.groups.ControllerConfigGroup;
 import org.matsim.core.config.groups.VspExperimentalConfigGroup;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controller;
@@ -73,6 +74,8 @@ public class MultipleIterationsCompleteLSPMobsimTest {
 	@BeforeEach
 	public void initialize() {
 		Config config = ConfigUtils.createConfig();
+
+		config.controller().setCompressionType(ControllerConfigGroup.CompressionType.gzip);
 
 		var freightConfig = ConfigUtils.addOrGetModule(config, FreightCarriersConfigGroup.class);
 		freightConfig.setTimeWindowHandling(FreightCarriersConfigGroup.TimeWindowHandling.ignore);
@@ -210,13 +213,9 @@ public class MultipleIterationsCompleteLSPMobsimTest {
 				.setResource(distributionResource)
 				.build();
 
-		collectionElement.connectWithNextElement(firstHubElement);
-		firstHubElement.connectWithNextElement(mainRunElement);
-		mainRunElement.connectWithNextElement(secondHubElement);
-		secondHubElement.connectWithNextElement(distributionElement);
 
-		final Id<LogisticChain> chainId = Id.create("SolutionId", LogisticChain.class);
-		LogisticChain completeSolution  = LSPUtils.LogisticChainBuilder.newInstance(chainId)
+		final Id<LogisticChain> chainId = Id.create("ChainId", LogisticChain.class);
+		LogisticChain completeChain  = LSPUtils.LogisticChainBuilder.newInstance(chainId)
 				.addLogisticChainElement(collectionElement)
 				.addLogisticChainElement(firstHubElement)
 				.addLogisticChainElement(mainRunElement)
@@ -227,7 +226,7 @@ public class MultipleIterationsCompleteLSPMobsimTest {
 		InitialShipmentAssigner assigner = ResourceImplementationUtils.createSingleLogisticChainShipmentAssigner();
 		LSPPlan completePlan = LSPUtils.createLSPPlan();
 		completePlan.setInitialShipmentAssigner(assigner);
-		completePlan.addLogisticChain(completeSolution);
+		completePlan.addLogisticChain(completeChain);
 
 		LSPUtils.LSPBuilder completeLSPBuilder = LSPUtils.LSPBuilder.getInstance(Id.create("CollectionLSP", LSP.class));
 		completeLSPBuilder.setInitialPlan(completePlan);
@@ -288,6 +287,7 @@ public class MultipleIterationsCompleteLSPMobsimTest {
 			TimeWindow startTimeWindow = TimeWindow.newInstance(0, (24 * 3600));
 			builder.setStartTimeWindow(startTimeWindow);
 			builder.setDeliveryServiceTime(capacityDemand * 60);
+			builder.setPickupServiceTime(capacityDemand * 60);
 			LspShipment shipment = builder.build();
 			completeLSP.assignShipmentToLspPlan(shipment);
 		}

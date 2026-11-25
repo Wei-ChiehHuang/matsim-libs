@@ -246,6 +246,8 @@ public class DrtConfigGroup extends ReflectiveConfigGroupWithConfigurableParamet
 	@Comment("Store planned unshared drt route as a link sequence")
 	private boolean storeUnsharedPath = false; // If true, the planned unshared path is stored and exported in plans
 
+
+
 	public enum SimulationType {
 		fullSimulation, estimateAndTeleport
 	}
@@ -287,6 +289,12 @@ public class DrtConfigGroup extends ReflectiveConfigGroupWithConfigurableParamet
 
 	@Nullable
 	private DrtParallelInserterParams drtParallelInserterParams;
+
+	@Nullable
+	private DrtServiceRegimesParams serviceRegimesParams;
+
+	@Nullable
+	private DrtPickupDropoffRestrictionParams pickupDropoffRestrictionParams;
 
 	private ZoneSystemParams analysisZoneSystemParams;
 
@@ -350,6 +358,16 @@ public class DrtConfigGroup extends ReflectiveConfigGroupWithConfigurableParamet
 			() -> drtEstimatorParams,
 			params -> drtEstimatorParams = (DrtEstimatorParams) params);
 
+		// time-dependent service regimes (optional)
+		addDefinition(DrtServiceRegimesParams.SET_NAME, DrtServiceRegimesParams::new,
+			() -> serviceRegimesParams,
+			params -> serviceRegimesParams = (DrtServiceRegimesParams) params);
+
+		// area in which the pickup and/or dropoff has to lie (optional)
+		addDefinition(DrtPickupDropoffRestrictionParams.SET_NAME, DrtPickupDropoffRestrictionParams::new,
+			() -> pickupDropoffRestrictionParams,
+			params -> pickupDropoffRestrictionParams = (DrtPickupDropoffRestrictionParams) params);
+
 		// load
 		addDefinition(DvrpLoadParams.SET_NAME, DvrpLoadParams::new,
 			() -> loadParams,
@@ -357,7 +375,7 @@ public class DrtConfigGroup extends ReflectiveConfigGroupWithConfigurableParamet
 
 		// analysis zone systems
 		ZoneSystemUtils.registerDefaultZoneSystems(this::addDefinition,  //
-			(ZoneSystemParams params) -> analysisZoneSystemParams = params, // 
+			(ZoneSystemParams params) -> analysisZoneSystemParams = params, //
 			() -> analysisZoneSystemParams);
 
 		addDefinition(ZonalSystemWrapper.SET_NAME, ZonalSystemWrapper::new,
@@ -413,9 +431,27 @@ public class DrtConfigGroup extends ReflectiveConfigGroupWithConfigurableParamet
 		Verify.verify(getOperationalScheme() != OperationalScheme.stopbased || getTransitStopFile() != null,
 				"transitStopFile must not be null when operationalScheme is " + OperationalScheme.stopbased);
 
-		Verify.verify(getOperationalScheme() != OperationalScheme.serviceAreaBased || getDrtServiceAreaShapeFile() != null,
-				"drtServiceAreaShapeFile must not be null when operationalScheme is "
-						+ OperationalScheme.serviceAreaBased);
+		// the polygons of the service regimes are an alternative source of the served area, see DrtServiceAreas
+		String serviceAreaFile = serviceRegimesParams == null ?
+				null :
+				serviceRegimesParams.getServiceAreaFile();
+
+		if (getOperationalScheme() == OperationalScheme.serviceAreaBased) {
+			Verify.verify(getDrtServiceAreaShapeFile() != null || serviceAreaFile != null,
+					"Either drtServiceAreaShapeFile or %s of %s must be set when operationalScheme is %s",
+					DrtServiceRegimesParams.SERVICE_AREA_FILE, DrtServiceRegimesParams.SET_NAME,
+					OperationalScheme.serviceAreaBased);
+			Verify.verify(getDrtServiceAreaShapeFile() == null || serviceAreaFile == null,
+					"drtServiceAreaShapeFile and %s of %s must not be set at the same time: the served area is the"
+							+ " union of the polygons of %s.", DrtServiceRegimesParams.SERVICE_AREA_FILE,
+					DrtServiceRegimesParams.SET_NAME, DrtServiceRegimesParams.SERVICE_AREA_FILE);
+		}
+
+		Verify.verify(serviceAreaFile == null || getOperationalScheme() != OperationalScheme.door2door,
+				"%s of %s must not be set when operationalScheme is %s: door2door serves every link, so service"
+						+ " regimes can only restrict the time there.",
+				DrtServiceRegimesParams.SERVICE_AREA_FILE, DrtServiceRegimesParams.SET_NAME,
+				OperationalScheme.door2door);
 
 		Verify.verify(getNumberOfThreads() <= Runtime.getRuntime().availableProcessors(),
 				"numberOfThreads is higher than the number of logical cores available to JVM");
@@ -435,6 +471,15 @@ public class DrtConfigGroup extends ReflectiveConfigGroupWithConfigurableParamet
 
 		if (isUseModeFilteredSubnetwork()) {
 			DvrpModeRoutingNetworkModule.checkUseModeFilteredSubnetworkAllowed(config, getMode());
+		}
+
+		if (serviceRegimesParams != null && getOperationalScheme() == OperationalScheme.door2door) {
+			// with door2door there are no stops, so a stopNetwork would be silently ineffective
+			serviceRegimesParams.getServiceRegimes()
+					.forEach(serviceRegime -> Verify.verify(serviceRegime.getStopNetwork() == null,
+							"stopNetwork of %s '%s' must not be set when operationalScheme is %s",
+							DrtServiceRegimeParams.SET_NAME, serviceRegime.getServiceRegimeName(),
+							OperationalScheme.door2door));
 		}
 
 		if (getSimulationType() == SimulationType.estimateAndTeleport) {
@@ -488,6 +533,14 @@ public class DrtConfigGroup extends ReflectiveConfigGroupWithConfigurableParamet
 
 	public Optional<DrtEstimatorParams> getDrtEstimatorParams() {
 		return Optional.ofNullable(drtEstimatorParams);
+	}
+
+	public Optional<DrtServiceRegimesParams> getServiceRegimesParams() {
+		return Optional.ofNullable(serviceRegimesParams);
+	}
+
+	public Optional<DrtPickupDropoffRestrictionParams> getPickupDropoffRestrictionParams() {
+		return Optional.ofNullable(pickupDropoffRestrictionParams);
 	}
 
 	public DvrpLoadParams addOrGetLoadParams() {

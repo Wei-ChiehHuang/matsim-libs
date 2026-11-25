@@ -21,7 +21,7 @@
 
 package org.matsim.freight.logistics.examples.multipleChains;
 
-import java.util.*;
+import jakarta.inject.Singleton;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.matsim.analysis.personMoney.PersonMoneyEventsAnalysisModule;
@@ -33,14 +33,17 @@ import org.matsim.contrib.roadpricing.*;
 import org.matsim.core.config.CommandLine;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
+import org.matsim.core.config.groups.ControllerConfigGroup;
 import org.matsim.core.config.groups.ScoringConfigGroup;
 import org.matsim.core.config.groups.VspExperimentalConfigGroup;
-import org.matsim.core.controler.*;
+import org.matsim.core.controler.AbstractModule;
+import org.matsim.core.controler.Controller;
+import org.matsim.core.controler.ControllerUtils;
+import org.matsim.core.controler.OutputDirectoryHierarchy;
 import org.matsim.core.replanning.GenericPlanStrategyImpl;
 import org.matsim.core.replanning.selectors.BestPlanSelector;
 import org.matsim.core.replanning.selectors.ExpBetaPlanSelector;
 import org.matsim.core.replanning.selectors.GenericWorstPlanForRemovalSelector;
-import org.matsim.core.replanning.selectors.KeepSelected;
 import org.matsim.core.scenario.ScenarioUtils;
 import org.matsim.core.utils.misc.Time;
 import org.matsim.freight.carriers.*;
@@ -50,12 +53,15 @@ import org.matsim.freight.carriers.controller.CarrierStrategyManager;
 import org.matsim.freight.carriers.usecases.CarrierScorerEventBasedInclToll;
 import org.matsim.freight.logistics.*;
 import org.matsim.freight.logistics.examples.ExampleConstants;
+import org.matsim.freight.logistics.examples.LogisticsExampleUtils;
 import org.matsim.freight.logistics.examples.MyLSPScorer;
 import org.matsim.freight.logistics.resourceImplementations.CarrierSchedulerUtils;
 import org.matsim.freight.logistics.resourceImplementations.ResourceImplementationUtils;
 import org.matsim.freight.logistics.shipment.LspShipment;
 import org.matsim.vehicles.VehicleType;
 import org.matsim.vehicles.VehicleUtils;
+
+import java.util.*;
 
 /**
  * This bases on {@link ExampleTwoLspsGroceryDeliveryMultipleChains}.
@@ -73,13 +79,13 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 
 	private static final List<String> TOLLED_LINKS = ExampleConstants.TOLLED_LINK_LIST_BERLIN_BOTH_DIRECTIONS;
 	private static List<String> TOLLED_VEHICLE_TYPES; //  Für welche Fahrzeugtypen soll das MautSchema gelten?
-	private static  double TOLL_VALUE ;
+	private static double TOLL_VALUE;
 
 	private static final String CARRIER_PLAN_FILE = "https://svn.vsp.tu-berlin.de/repos/public-svn/matsim/scenarios/countries/de/berlin/projects/freight/foodRetailing_wo_rangeConstraint/input/CarrierLEH_v2_withFleet_Shipment_OneTW_PickupTime_ICEVandBEV.xml";
 	private static final String VEHICLE_TYPE_FILE = "https://svn.vsp.tu-berlin.de/repos/public-svn/matsim/scenarios/countries/de/berlin/projects/freight/foodRetailing_wo_rangeConstraint/input/vehicleTypesBVWP100_DC_noTax.xml";
 
 	private static int MATSIM_ITERATIONS;
-	private static String OUTPUT_DIRECTORY ;
+	private static String OUTPUT_DIRECTORY;
 	private static int jspritIterationsDistributionCarrier = 10;
 	private static int jspritIterationsMainCarrier = 1;
 	private static int jspritIterationsDirectCarrier = 10;
@@ -93,9 +99,12 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 		THREE_PLANS_DIRECT_AND_2ECHELON_AND_BOTH
 	}
 
-	private record LspDefinition(String name, String carrierId, Id<Link> hubLinkId, List<String> vehTypesDirect, List<String> vehicleTypesMain, List<String> vehicleTypesDelivery) {}
+	private record LspDefinition(String name, String carrierId, Id<Link> hubLinkId, List<String> vehTypesDirect, List<String> vehicleTypesMain,
+								 List<String> vehicleTypesDelivery) {
+	}
 
-	private ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll() {}
+	private ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll() {
+	}
 
 
 	/**
@@ -113,7 +122,7 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 
 		//Muss noch weiter auf die anderen Optionen angepasst werden.
 		MATSIM_ITERATIONS = cmd.getOption("matsimIterations").map(Integer::parseInt).orElse(1); // I know that MATSim-iters can be set more directly.
-		OUTPUT_DIRECTORY = cmd.getOption("outputDirectory").orElse("output/groceryDeliveryWToll_"+MATSIM_ITERATIONS+"it"); // Todo: replace with the central setting: --config:controller.outputDirectory
+		OUTPUT_DIRECTORY = cmd.getOption("outputDirectory").orElse("output/groceryDeliveryWToll_" + MATSIM_ITERATIONS + "it"); // Todo: replace with the central setting: --config:controller.outputDirectory
 
 		jspritIterationsMainCarrier = cmd.getOption("jspritIterationsMain").map(Integer::parseInt).orElse(1);
 		jspritIterationsDirectCarrier = cmd.getOption("jspritIterationsDirect").map(Integer::parseInt).orElse(1);
@@ -155,7 +164,7 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 				.orElse(null)
 		);
 		//these two values needs to be set for all uses. The others depend on the setting "typeOfLsps". Will not look at them here.
-		if (lsp1Definition.name()!=null && lsp1Definition.carrierId()!=null) {
+		if (lsp1Definition.name() != null && lsp1Definition.carrierId() != null) {
 			lspDefinitionList.add(lsp1Definition);
 		}
 
@@ -185,7 +194,7 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 				.orElse(null)
 		);
 		//these two values needs to be set for all uses. The others depend on the setting "typeOfLsps". Will not look at them here.
-		if (lsp2Definition.name()!=null && lsp2Definition.carrierId()!=null) {
+		if (lsp2Definition.name() != null && lsp2Definition.carrierId() != null) {
 			lspDefinitionList.add(lsp2Definition);
 		}
 
@@ -253,7 +262,7 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 
 			switch (typeOfLsps) {
 				case ONE_PLAN_ONLY_DIRECT_CHAIN -> {
-					LSP lsp = createLsp1PlanWith1Chain_Direct(scenario, lspDefinition.name()+ "_DIRECT", carrierVehiclesDirect);
+					LSP lsp = createLsp1PlanWith1Chain_Direct(scenario, lspDefinition.name() + "_DIRECT", carrierVehiclesDirect);
 					assignLspShipments(lsp, lspShipmentsFromCarrierShipments);
 					lsps.add(lsp);
 				}
@@ -316,7 +325,6 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 	}
 
 
-
 	private static Config prepareConfig(String[] args) {
 		Config config = ConfigUtils.createConfig();
 		if (args.length != 0) {
@@ -333,6 +341,7 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 		config.global().setCoordinateSystem("EPSG:31468");
 		config.global().setRandomSeed(4177);
 		config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
+		config.controller().setCompressionType(ControllerConfigGroup.CompressionType.gzip);
 
 		FreightCarriersConfigGroup freightConfig = ConfigUtils.addOrGetModule(config, FreightCarriersConfigGroup.class);
 		freightConfig.setTimeWindowHandling(FreightCarriersConfigGroup.TimeWindowHandling.ignore);
@@ -356,7 +365,10 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 			new AbstractModule() {
 				@Override
 				public void install() {
-					bind(CarrierScoringFunctionFactory.class).toInstance(new CarrierScorerEventBasedInclToll());
+					// bind one instance of the factory and then bind that instance to the interface and the controller listener binding
+					bind(CarrierScorerEventBasedInclToll.class).in(Singleton.class);
+					bind(CarrierScoringFunctionFactory.class).to(CarrierScorerEventBasedInclToll.class);
+					addControllerListenerBinding().to(CarrierScorerEventBasedInclToll.class);
 					bind(LSPScorerFactory.class).toInstance(MyLSPScorer::new);
 					bind(CarrierStrategyManager.class)
 						.toProvider(
@@ -388,7 +400,7 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 			});
 		if (!rpScheme.getTolledLinkIds().isEmpty()) {
 			// RoadPricing.configure(controller);
-			controller.addOverridingModule( new RoadPricingModule(rpScheme) );
+			controller.addOverridingModule(new RoadPricingModule(rpScheme));
 		}
 		return controller;
 	}
@@ -409,9 +421,9 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 			.addLogisticChain(createDirectChain(scenario, lspName, carrierVehicles))
 			.setInitialShipmentAssigner(MultipleChainsUtils.createRandomLogisticChainShipmentAssigner());
 
-		return  LSPUtils.LSPBuilder.getInstance(Id.create(lspName, LSP.class))
+		return LSPUtils.LSPBuilder.getInstance(Id.create(lspName, LSP.class))
 			.setInitialPlan(lspPlan)
-			.setLogisticChainScheduler(ResourceImplementationUtils.createDefaultSimpleForwardLogisticChainScheduler(createResourcesListFromLSPPlans(List.of(lspPlan))))
+			.setLogisticChainScheduler(ResourceImplementationUtils.createDefaultSimpleForwardLogisticChainScheduler(LogisticsExampleUtils.createResourcesListFromLSPPlans(List.of(lspPlan))))
 			.build();
 	}
 
@@ -443,7 +455,7 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 
 		return LSPUtils.LSPBuilder.getInstance(Id.create(lspName, LSP.class))
 			.setInitialPlan(lspPlan)
-			.setLogisticChainScheduler(ResourceImplementationUtils.createDefaultSimpleForwardLogisticChainScheduler(createResourcesListFromLSPPlans(List.of(lspPlan))))
+			.setLogisticChainScheduler(ResourceImplementationUtils.createDefaultSimpleForwardLogisticChainScheduler(LogisticsExampleUtils.createResourcesListFromLSPPlans(List.of(lspPlan))))
 			.build();
 	}
 
@@ -481,7 +493,7 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 
 		return LSPUtils.LSPBuilder.getInstance(Id.create(lspName, LSP.class))
 			.setInitialPlan(lspPlan)
-			.setLogisticChainScheduler(ResourceImplementationUtils.createDefaultSimpleForwardLogisticChainScheduler(createResourcesListFromLSPPlans(List.of(lspPlan))))
+			.setLogisticChainScheduler(ResourceImplementationUtils.createDefaultSimpleForwardLogisticChainScheduler(LogisticsExampleUtils.createResourcesListFromLSPPlans(List.of(lspPlan))))
 			.build();
 	}
 
@@ -524,7 +536,7 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 
 		return LSPUtils.LSPBuilder.getInstance(Id.create(lspName, LSP.class))
 			.setInitialPlan(lspPlans.getFirst())
-			.setLogisticChainScheduler(ResourceImplementationUtils.createDefaultSimpleForwardLogisticChainScheduler(createResourcesListFromLSPPlans(lspPlans)))
+			.setLogisticChainScheduler(ResourceImplementationUtils.createDefaultSimpleForwardLogisticChainScheduler(LogisticsExampleUtils.createResourcesListFromLSPPlans(lspPlans)))
 			.build();
 	}
 
@@ -575,7 +587,7 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 
 		return LSPUtils.LSPBuilder.getInstance(Id.create(lspName, LSP.class))
 			.setInitialPlan(lspPlans.getFirst())
-			.setLogisticChainScheduler(ResourceImplementationUtils.createDefaultSimpleForwardLogisticChainScheduler(createResourcesListFromLSPPlans(lspPlans)))
+			.setLogisticChainScheduler(ResourceImplementationUtils.createDefaultSimpleForwardLogisticChainScheduler(LogisticsExampleUtils.createResourcesListFromLSPPlans(lspPlans)))
 			.build();
 	}
 
@@ -594,7 +606,7 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 	 */
 	private static LogisticChain createTwoEchelonChain(Scenario scenario, String lspName, Id<Link> hubLinkId, Id<Link> depotLinkFromVehicles, List<CarrierVehicle> carrierVehiclesMain, List<CarrierVehicle> carrierVehiclesDistribution) {
 		LogisticChain hubChain;
-		Carrier mainCarrier = CarriersUtils.createCarrier(Id.create(lspName +"_mainCarrier", Carrier.class));
+		Carrier mainCarrier = CarriersUtils.createCarrier(Id.create(lspName + "_mainCarrier", Carrier.class));
 		mainCarrier.getCarrierCapabilities().setFleetSize(CarrierCapabilities.FleetSize.INFINITE);
 		CarriersUtils.setJspritIterations(mainCarrier, jspritIterationsMainCarrier);
 
@@ -618,17 +630,17 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 			.setCapacityNeedLinear(1)
 			.build();
 
-		LSPResource hubResource = ResourceImplementationUtils.TransshipmentHubBuilder.newInstance(Id.create(lspName +"_Hub", LSPResource.class), hubLinkId, scenario)
+		LSPResource hubResource = ResourceImplementationUtils.TransshipmentHubBuilder.newInstance(Id.create(lspName + "_Hub", LSPResource.class), hubLinkId, scenario)
 			.setTransshipmentHubScheduler(hubScheduler)
 			.build();
 
 		LSPUtils.setFixedCost(hubResource, HUBCOSTS_FIX);
 
-		LogisticChainElement hubElement =  LSPUtils.LogisticChainElementBuilder.newInstance(Id.create("HubElement", LogisticChainElement.class))
+		LogisticChainElement hubElement = LSPUtils.LogisticChainElementBuilder.newInstance(Id.create("HubElement", LogisticChainElement.class))
 			.setResource(hubResource)
 			.build();
 
-		Carrier distributionCarrier = CarriersUtils.createCarrier(Id.create(lspName +"_distributionCarrier", Carrier.class));
+		Carrier distributionCarrier = CarriersUtils.createCarrier(Id.create(lspName + "_distributionCarrier", Carrier.class));
 		distributionCarrier.getCarrierCapabilities()
 			//.setNumberOfJspritIterations // TODO Das mal hier einbauen. --> Ist aktuell in CarrierUtils.
 			.setFleetSize(CarrierCapabilities.FleetSize.INFINITE);
@@ -649,8 +661,6 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 			.setResource(distributionCarrierResource)
 			.build();
 
-		mainCarrierElement.connectWithNextElement(hubElement);
-		hubElement.connectWithNextElement(distributionCarrierElement);
 
 		hubChain = LSPUtils.LogisticChainBuilder.newInstance(Id.create("hubChain", LogisticChain.class))
 			.addLogisticChainElement(mainCarrierElement)
@@ -686,23 +696,10 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 		return directChain;
 	}
 
-	private static List<LSPResource> createResourcesListFromLSPPlans(List<LSPPlan> lspPlans) {
-		log.info("Collecting all LSPResources from the LSPPlans");
-		List<LSPResource> resourceList = new ArrayList<>();
-		for (LSPPlan lspPlan : lspPlans) {
-			for (LogisticChain logisticChain : lspPlan.getLogisticChains()) {
-				for (LogisticChainElement logisticChainElement : logisticChain.getLogisticChainElements()) {
-					resourceList.add(logisticChainElement.getResource());
-				}
-			}
-		}
-		return resourceList;
-	}
-
 	/**
 	 * Extract the vehicle types from the available types
 	 *
-	 * @param typeNames List of names of vehicle types to extract
+	 * @param typeNames      List of names of vehicle types to extract
 	 * @param availableTypes container with all available vehicle types
 	 * @return the extracted vehicle types
 	 */
@@ -745,7 +742,7 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 	 * Assigns the LSP shipments to the LSP.
 	 * Splits the shipments if needed.
 	 *
-	 * @param lsp the LSP
+	 * @param lsp          the LSP
 	 * @param lspShipments lsp shipments to assign
 	 */
 	private static void assignLspShipments(LSP lsp, Collection<LspShipment> lspShipments) {
@@ -762,7 +759,7 @@ final class ExampleTwoLspsGroceryDeliveryMultipleChainsWithToll {
 	private static RoadPricingSchemeUsingTollFactor setUpRoadpricing(Scenario scenario) {
 
 		//Create Rp Scheme from code.
-		RoadPricingSchemeImpl scheme = RoadPricingUtils.addOrGetMutableRoadPricingScheme(scenario );
+		RoadPricingSchemeImpl scheme = RoadPricingUtils.addOrGetMutableRoadPricingScheme(scenario);
 
 		/* Configure roadpricing scheme. */
 		RoadPricingUtils.setName(scheme, "MautFromCodeKMT");

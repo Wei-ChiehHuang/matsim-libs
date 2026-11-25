@@ -30,11 +30,11 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Coord;
 import org.matsim.api.core.v01.Id;
-import org.matsim.api.core.v01.IdMap;
 import org.matsim.api.core.v01.Scenario;
 import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.population.*;
 import org.matsim.core.router.AnalysisMainModeIdentifier;
+import org.matsim.core.router.DefaultAnalysisMainModeIdentifier;
 import org.matsim.core.router.TripStructureUtils;
 import org.matsim.core.scoring.EventsToLegs;
 import org.matsim.core.utils.collections.Tuple;
@@ -47,10 +47,7 @@ import org.matsim.vehicles.Vehicle;
 import org.matsim.vehicles.VehicleType;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 
@@ -90,11 +87,20 @@ public class TripsAndLegsWriter {
 		LEGSHEADER = ArrayUtils.addAll(LEGSHEADER_BASE, legWriterExtension.getAdditionalLegHeader());
 	}
 
+	/**
+	 * Creates a writer with the same settings that a default MATSim run uses: no additional trip or leg columns, the
+	 * {@link DefaultAnalysisMainModeIdentifier} and times written as {@code hh:mm:ss}. Use this to write the files outside
+	 * of a running controller, e.g. from the output files of a finished run.
+	 */
+	public TripsAndLegsWriter(Scenario scenario) {
+		this(scenario, new NoTripWriterExtension(), new NoLegsWriterExtension(), new DefaultAnalysisMainModeIdentifier(), new DefaultTimeWriter());
+	}
+
 	private char getDefaultDelimiter() {
 		return scenario.getConfig().global().getDefaultDelimiter().charAt(0);
 	}
 
-	public void write(IdMap<Person, Plan> experiencedPlans, String tripsFilename, String legsFilename) {
+	public void write(Map<Id<Person>, Plan> experiencedPlans, String tripsFilename, String legsFilename) {
 		try (CSVPrinter tripsCSVprinter = new CSVPrinter(IOUtils.getBufferedWriter(tripsFilename),
 			CSVFormat.Builder.create().setDelimiter(getDefaultDelimiter()).setHeader(TRIPSHEADER).build());
 			 CSVPrinter legsCSVprinter = new CSVPrinter(IOUtils.getBufferedWriter(legsFilename),
@@ -106,7 +112,7 @@ public class TripsAndLegsWriter {
 				legsCSVprinter.printRecords(tripsAndLegRecords.getSecond());
 			}
 		} catch (IOException e) {
-			e.printStackTrace();
+			throw new RuntimeException(e);
 		}
 	}
 
@@ -284,7 +290,7 @@ public class TripsAndLegsWriter {
 		Coord endCoord = getCoordFromActivity(nextAct);
 		record.add(Double.toString(startCoord.getX()));
 		record.add(Double.toString(startCoord.getY()));
-		record.add(leg.getRoute().getEndLinkId().toString());
+		record.add(Objects.toString(leg.getRoute().getEndLinkId()));
 		record.add(Double.toString(endCoord.getX()));
 		record.add(Double.toString(endCoord.getY()));
 		String transitLine = "";

@@ -36,6 +36,7 @@ import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
+import org.matsim.core.config.groups.ControllerConfigGroup;
 import org.matsim.core.config.groups.VspExperimentalConfigGroup;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controller;
@@ -159,20 +160,18 @@ public class MultipleShipmentsMainRunLSPMobsimTest {
 				.setResource(mainRunResource)
 				.build();
 
-		collectionElement.connectWithNextElement(firstHubElement);
-		firstHubElement.connectWithNextElement(mainRunElement);
 
-		Id<LogisticChain> solutionId = Id.create("SolutionId", LogisticChain.class);
-		LSPUtils.LogisticChainBuilder completeSolutionBuilder = LSPUtils.LogisticChainBuilder.newInstance(solutionId);
-		completeSolutionBuilder.addLogisticChainElement(collectionElement);
-		completeSolutionBuilder.addLogisticChainElement(firstHubElement);
-		completeSolutionBuilder.addLogisticChainElement(mainRunElement);
-		LogisticChain completeSolution = completeSolutionBuilder.build();
+		Id<LogisticChain> chainId = Id.create("ChainId", LogisticChain.class);
+		LSPUtils.LogisticChainBuilder completeChainBuilder = LSPUtils.LogisticChainBuilder.newInstance(chainId);
+		completeChainBuilder.addLogisticChainElement(collectionElement);
+		completeChainBuilder.addLogisticChainElement(firstHubElement);
+		completeChainBuilder.addLogisticChainElement(mainRunElement);
+		LogisticChain completeChain = completeChainBuilder.build();
 
 		InitialShipmentAssigner assigner = ResourceImplementationUtils.createSingleLogisticChainShipmentAssigner();
 		LSPPlan completePlan = LSPUtils.createLSPPlan();
 		completePlan.setInitialShipmentAssigner(assigner);
-		completePlan.addLogisticChain(completeSolution);
+		completePlan.addLogisticChain(completeChain);
 
 		LSPUtils.LSPBuilder completeLSPBuilder = LSPUtils.LSPBuilder.getInstance(Id.create("CollectionLSP", LSP.class));
 		completeLSPBuilder.setInitialPlan(completePlan);
@@ -228,6 +227,7 @@ public class MultipleShipmentsMainRunLSPMobsimTest {
 			TimeWindow startTimeWindow = TimeWindow.newInstance(0, (24 * 3600));
 			builder.setStartTimeWindow(startTimeWindow);
 			builder.setDeliveryServiceTime(capacityDemand * 60);
+			builder.setPickupServiceTime(capacityDemand * 60);
 			LspShipment shipment = builder.build();
 			lsp.assignShipmentToLspPlan(shipment);
 		}
@@ -246,6 +246,7 @@ public class MultipleShipmentsMainRunLSPMobsimTest {
 		config.controller().setLastIteration(0);
 		config.controller().setOverwriteFileSetting(OverwriteFileSetting.deleteDirectoryIfExists);
 		config.controller().setOutputDirectory(utils.getOutputDirectory());
+		config.controller().setCompressionType(ControllerConfigGroup.CompressionType.gzip);
 		//The VSP default settings are designed for person transport simulation. After talking to Kai, they will be set to WARN here. Kai MT may'23
 		controller.getConfig().vspExperimental().setVspDefaultsCheckingLevel(VspExperimentalConfigGroup.VspDefaultsCheckingLevel.warn);
 		controller.run();

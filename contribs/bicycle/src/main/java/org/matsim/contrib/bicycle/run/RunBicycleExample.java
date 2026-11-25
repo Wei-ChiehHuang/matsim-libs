@@ -37,6 +37,7 @@ import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controler;
 import org.matsim.core.controler.OutputDirectoryHierarchy.OverwriteFileSetting;
 import org.matsim.core.scenario.ScenarioUtils;
+import org.matsim.vehicles.Vehicle;
 import org.matsim.vehicles.VehicleType;
 import org.matsim.vehicles.VehicleUtils;
 import org.matsim.vehicles.VehiclesFactory;
@@ -99,10 +100,10 @@ public class RunBicycleExample {
 		config.replanning().addStrategySettings( new StrategySettings().setStrategyName("ChangeExpBeta" ).setWeight(0.8 ) );
 		config.replanning().addStrategySettings( new StrategySettings().setStrategyName("ReRoute" ).setWeight(0.2 ) );
 
-		config.scoring().addActivityParams( new ActivityParams("home").setTypicalDuration(12*60*60 ) );
-		config.scoring().addActivityParams( new ActivityParams("work").setTypicalDuration(8*60*60 ) );
+		config.scoring().addDefaultActivityParams( new ActivityParams("home").setTypicalDuration(12*60*60 ) );
+		config.scoring().addDefaultActivityParams( new ActivityParams("work").setTypicalDuration(8*60*60 ) );
 
-		config.scoring().addModeParams( new ModeParams("bicycle").setConstant(0. ).setMarginalUtilityOfDistance(-0.0004 ).setMarginalUtilityOfTraveling(-6.0 ).setMonetaryDistanceRate(0. ) );
+		config.scoring().addDefaultModeParams( new ModeParams("bicycle").setConstant(0. ).setMarginalUtilityOfDistance(-0.0004 ).setMarginalUtilityOfTraveling(-6.0 ).setMonetaryDistanceRate(0. ) );
 
 		config.routing().setNetworkModes(mainModeList);
 	}
@@ -170,10 +171,10 @@ public class RunBicycleExample {
 
 		@Inject private AdditionalBicycleLinkScoreDefaultImpl delegate;
 
-		@Override public double computeLinkBasedScore( Link link ){
+		@Override public double computeLinkBasedScore(Link link, Id<Vehicle> vehicleId, String bicycleMode ){
 			double result = (double) link.getAttributes().getAttribute( "carFreeStatus" );  // from zero to one
 
-			double amount = delegate.computeLinkBasedScore( link );
+			double amount = delegate.computeLinkBasedScore( link, vehicleId, bicycleMode );
 
 			return amount + result ;  // or some other way to augment the score
 

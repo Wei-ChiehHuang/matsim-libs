@@ -32,6 +32,7 @@ import org.matsim.api.core.v01.network.Network;
 import org.matsim.core.config.CommandLine;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
+import org.matsim.core.config.groups.ControllerConfigGroup;
 import org.matsim.core.config.groups.VspExperimentalConfigGroup;
 import org.matsim.core.controler.*;
 import org.matsim.core.replanning.GenericPlanStrategyImpl;
@@ -55,15 +56,15 @@ import org.matsim.vehicles.VehicleType;
 import org.matsim.vehicles.VehicleUtils;
 
 /**
- * The LSP have to possibilities to send the goods from the first depot to the recipients: A) via
- * another hub and then distributed or B) directly from the depot
+ * The LSP has two possibilities to move goods from the depot to the recipients: A) via a hub and
+ * then distributed, or B) directly from the depot.
  *
- * <p>This examples bases on the Example ExampleSchedulingOfTransportChain.class -- the collection
- * Part is removed, Chain is now starting at the CollectionHub
+ * <p>This example is based on {@link ExampleSchedulingOfTransportChain}; the collection part is
+ * removed and the chain now starts at the depot.
  *
- * <p>Scheduler = Macht die Pläne für die Fahrzeuge für die nächste MATSim-Iteration. Er plant es
- * für jede Ressource. → jede Ressource hat einen eigenen Scheduler: 1.) Simple: Nimm die
- * mitgegebene Reihenfolge. 2.)
+ * <p>Schedulers build the vehicle plans for the next MATSim iteration; each resource has its own
+ * scheduler. The scheduler either takes the given order of the chain ("simple"), or runs a
+ * scheduling algorithm.
  */
 /*package-private*/ final class ExampleSchedulingOfTransportChainHubsVsDirect {
 
@@ -102,8 +103,9 @@ import org.matsim.vehicles.VehicleUtils;
         .controller()
         .setOverwriteFileSetting(
             OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
-    // The VSP default settings are designed for person transport simulation. After talking to Kai,
-    // they will be set to WARN here. Kai MT may'23
+	  config.controller().setCompressionType(ControllerConfigGroup.CompressionType.gzip);
+    // The VSP default settings are designed for person transport simulation, so the checking
+    // level is relaxed to WARN here. (KMT may'23, after talking to Kai)
     config.vspExperimental().setVspDefaultsCheckingLevel(VspExperimentalConfigGroup.VspDefaultsCheckingLevel.warn);
 
     var freightConfig = ConfigUtils.addOrGetModule(config, FreightCarriersConfigGroup.class);
@@ -198,7 +200,7 @@ import org.matsim.vehicles.VehicleUtils;
 
     LogisticChainElement depotElement;
     {
-      // The SolutionElement for the first reloading point is created
+      // The LogisticChainElement for the first reloading point is created
 
       log.info("");
       log.info("Create depot");
@@ -224,10 +226,10 @@ import org.matsim.vehicles.VehicleUtils;
               .setResource(depotResource)
               .build(); // Nicht unbedingt nötig, aber nehme den alten Hub nun als Depot. Waren
                         // werden dann dort "Zusammengestellt".
-      // Maybe TODO: Depot als LogisticSolutionElement raus nehmen.(?)
+      // Maybe TODO: Depot als LogisticChainElement raus nehmen.(?)
     }
 
-    // The LogisticsSolutionElement for the main run Resource is created
+    // The LogisticChainElement for the main run Resource is created
     LogisticChainElement mainRunElement;
     {
       log.info("");
@@ -291,8 +293,8 @@ import org.matsim.vehicles.VehicleUtils;
               .setTransshipmentHubScheduler(hubScheduler)
               .build();
 
-      // The adapter is now inserted into the corresponding LogisticsSolutionElement of the only
-      // LogisticsSolution of the LSP
+      // The adapter is now inserted into the corresponding LogisticChainElement of the only
+      // LogisticChain of the LSP
       hubElement =
           LSPUtils.LogisticChainElementBuilder.newInstance(
                   Id.create("SecondHubElement", LogisticChainElement.class))
@@ -329,8 +331,8 @@ import org.matsim.vehicles.VehicleUtils;
               .build();
       // (The scheduler is where jsprit comes into play.)
 
-      // The adapter is now inserted into the corresponding LogisticsSolutionElement of the only
-      // LogisticsSolution of the LSP
+      // The adapter is now inserted into the corresponding LogisticChainElement of the only
+      // LogisticChain of the LSP
 
       distributionElement =
           LSPUtils.LogisticChainElementBuilder.newInstance(
@@ -372,8 +374,8 @@ import org.matsim.vehicles.VehicleUtils;
               .build();
       // (The scheduler is where jsprit comes into play.)
 
-      // The adapter is now inserted into the corresponding LogisticsSolutionElement of the only
-      // LogisticsSolution of the LSP
+      // The adapter is now inserted into the corresponding LogisticChainElement of the only
+      // LogisticChain of the LSP
       directDistributionElement =
           LSPUtils.LogisticChainElementBuilder.newInstance(
                   Id.create("DirectDistributionElement", LogisticChainElement.class))
@@ -384,11 +386,10 @@ import org.matsim.vehicles.VehicleUtils;
 
     // TODO: Beide Lösungen anbieten und "bessere" oder zunächst "eine" auswählen"
 
-    // TODO: Für die Auswahl "CostInfo an die Solutions dran heften.
+    // TODO: Für die Auswahl "CostInfo an die LogisticChains dran heften.
 
-    // The SolutionElements are now inserted into the only LogisticsSolution of the LSP.
-    // Die Reihenfolge des Hinzufügens ist egal, da weiter oben die jeweils direkten
-    // Vorgänger/Nachfolger bestimmt wurden.
+    // The LogisticChainElements are now inserted into the only LogisticChain of the LSP.
+    // The order of adding them is irrelevant, since the predecessor/successor links were already set above.
 
     switch (solutionType) {
       case onePlan_withHub -> {
@@ -434,8 +435,8 @@ import org.matsim.vehicles.VehicleUtils;
             createLSPPlan_reloading(depotElement, mainRunElement, hubElement, distributionElement);
         LSPPlan lspPlan_direct = createLSPPlan_direct(depotElement, directDistributionElement);
 
-        // TODO: Müsste nicht eigentlich der SolutionScheduler dann auf Ebene der einzelnen Pläne
-        // (mit ihren Solutions) sein?? kmt Feb22
+        // TODO: Müsste nicht eigentlich der LogisticChainScheduler dann auf Ebene der einzelnen Pläne
+        // (mit ihren LogisticChains) sein?? kmt Feb22
         // So muss ich erst die Ressourcen aus beiden hinzuzufügenden Plänen aufsammeln, damit die
         // dann schon in den Builder können. Irgendwie unschön.
         List<LSPResource> resourcesList = createResourcesListFromLSPPlan(lspPlan_direct);
@@ -460,11 +461,10 @@ import org.matsim.vehicles.VehicleUtils;
   private static List<LSPResource> createResourcesListFromLSPPlan(LSPPlan lspPlanWithReloading) {
     log.info("Collecting all LSPResources from the LSPPlan");
     List<LSPResource> resourcesList =
-        new ArrayList<>(); // TODO: Mahe daraus ein Set, damit jede Resource nur einmal drin ist?
-                           // kmt Feb22
-    for (LogisticChain solution : lspPlanWithReloading.getLogisticChains()) {
-      for (LogisticChainElement solutionElement : solution.getLogisticChainElements()) {
-        resourcesList.add(solutionElement.getResource());
+        new ArrayList<>(); // TODO: Mahe daraus ein Set, damit jede Resource nur einmal drin ist? kmt Feb22
+    for (LogisticChain chain : lspPlanWithReloading.getLogisticChains()) {
+      for (LogisticChainElement chainElement : chain.getLogisticChainElements()) {
+        resourcesList.add(chainElement.getResource());
       }
     }
     return resourcesList;
@@ -473,24 +473,20 @@ import org.matsim.vehicles.VehicleUtils;
   private static LSPPlan createLSPPlan_direct(
       LogisticChainElement depotElement, LogisticChainElement directDistributionElement) {
 
-    log.info("The order of the logisticsSolutionElements is now specified");
-    depotElement.connectWithNextElement(directDistributionElement);
+    log.info("set up logistic chain - direct distribution from the depot is created");
 
-
-    log.info("set up logistic Solution - direct distribution from the depot is created");
-
-    LogisticChain completeSolutionDirect =
+    LogisticChain completeChainDirect =
         LSPUtils.LogisticChainBuilder.newInstance(
-                Id.create("SolutionDirectId", LogisticChain.class))
+                Id.create("ChainDirectId", LogisticChain.class))
             .addLogisticChainElement(depotElement)
             .addLogisticChainElement(directDistributionElement)
             .build();
 
-    log.info("The initial plan of the lsp is generated and the assigner and the solution from above are added");
+    log.info("The initial plan of the lsp is generated and the assigner and the chain from above are added");
 
     return LSPUtils.createLSPPlan()
         .setInitialShipmentAssigner(ResourceImplementationUtils.createSingleLogisticChainShipmentAssigner())
-        .addLogisticChain(completeSolutionDirect);
+        .addLogisticChain(completeChainDirect);
   }
 
   private static LSPPlan createLSPPlan_reloading(
@@ -499,27 +495,22 @@ import org.matsim.vehicles.VehicleUtils;
       LogisticChainElement hubElement,
       LogisticChainElement distributionElement) {
 
-    log.info("set up logistic Solution - original with hub usage solution is created");
+    log.info("set up logistic chain - original with hub usage chain is created");
 
-    // Das ist wichtig, damit er die Kette zur Verfügung hat.
-    depotElement.connectWithNextElement(mainRunElement);
-    mainRunElement.connectWithNextElement(hubElement);
-    hubElement.connectWithNextElement(distributionElement);
-
-    LogisticChain completeSolutionWithReloading =
+    LogisticChain completeChainWithReloading =
         LSPUtils.LogisticChainBuilder.newInstance(
-                Id.create("SolutionWithTransshipmentHubId", LogisticChain.class))
+                Id.create("ChainWithTransshipmentHubId", LogisticChain.class))
             .addLogisticChainElement(depotElement)
             .addLogisticChainElement(mainRunElement)
             .addLogisticChainElement(hubElement)
             .addLogisticChainElement(distributionElement)
             .build();
 
-    log.info("The initial plan of the lsp is generated and the assigner and the solution from above are added");
+    log.info("The initial plan of the lsp is generated and the assigner and the chain from above are added");
 
     return LSPUtils.createLSPPlan()
         .setInitialShipmentAssigner(ResourceImplementationUtils.createSingleLogisticChainShipmentAssigner())
-        .addLogisticChain(completeSolutionWithReloading);
+        .addLogisticChain(completeChainWithReloading);
   }
 
   private static VehicleType createCarrierVehicleType(String vehicleTypeId) {
@@ -567,6 +558,7 @@ import org.matsim.vehicles.VehicleUtils;
       TimeWindow startTimeWindow = TimeWindow.newInstance(0, (24 * 3600));
       builder.setStartTimeWindow(startTimeWindow);
       builder.setDeliveryServiceTime(capacityDemand * 60);
+      builder.setPickupServiceTime(capacityDemand * 60);
       LspShipment lspShipment = builder.build();
       shipmentList.add(lspShipment);
     }
@@ -589,7 +581,9 @@ import org.matsim.vehicles.VehicleUtils;
     }
 
     @Override
-    public void setEmbeddingContainer(LSP pointer) {}
+    public void setEmbeddingContainer(LSP pointer) {
+      // The back pointer is not used by this tracker.
+    }
 
     @Override
     public void handleEvent(CarrierTourEndEvent event) {

@@ -36,6 +36,7 @@ import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
+import org.matsim.core.config.groups.ControllerConfigGroup;
 import org.matsim.core.config.groups.VspExperimentalConfigGroup;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controller;
@@ -115,10 +116,10 @@ public class CollectionTrackerTest {
 		collectionElementBuilder.setResource(collectionResource);
 		LogisticChainElement collectionElement = collectionElementBuilder.build();
 
-		Id<LogisticChain> collectionSolutionId = Id.create("CollectionSolution", LogisticChain.class);
-		LSPUtils.LogisticChainBuilder collectionSolutionBuilder = LSPUtils.LogisticChainBuilder.newInstance(collectionSolutionId);
-		collectionSolutionBuilder.addLogisticChainElement(collectionElement);
-		logisticChain = collectionSolutionBuilder.build();
+		Id<LogisticChain> collectionChainId = Id.create("CollectionChain", LogisticChain.class);
+		LSPUtils.LogisticChainBuilder collectionChainBuilder = LSPUtils.LogisticChainBuilder.newInstance(collectionChainId);
+		collectionChainBuilder.addLogisticChainElement(collectionElement);
+		logisticChain = collectionChainBuilder.build();
 
 		{
 			shareOfFixedCosts = 0.2;
@@ -173,6 +174,7 @@ public class CollectionTrackerTest {
 			TimeWindow startTimeWindow = TimeWindow.newInstance(0, (24 * 3600));
 			builder.setStartTimeWindow(startTimeWindow);
 			builder.setDeliveryServiceTime(capacityDemand * 60);
+			builder.setPickupServiceTime(capacityDemand * 60);
 			LspShipment shipment = builder.build();
 			collectionLSP.assignShipmentToLspPlan(shipment);
 		}
@@ -191,6 +193,7 @@ public class CollectionTrackerTest {
 		config.controller().setFirstIteration(0);
 		config.controller().setLastIteration(0);
 		config.controller().setOverwriteFileSetting(OverwriteFileSetting.deleteDirectoryIfExists);
+		config.controller().setCompressionType(ControllerConfigGroup.CompressionType.gzip);
 //		config.network().setInputFile(ExamplesUtils.getTestScenarioURL("logistics-2regions") + "2regions-network.xml");
 		config.controller().setOutputDirectory(utils.getOutputDirectory());
 		//The VSP default settings are designed for person transport simulation. After talking to Kai, they will be set to WARN here. Kai MT may'23

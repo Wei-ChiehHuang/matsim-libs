@@ -8,6 +8,7 @@ import org.matsim.api.core.v01.network.Network;
 import org.matsim.api.core.v01.network.Node;
 import org.matsim.core.network.NetworkUtils;
 import org.matsim.core.network.algorithms.MultimodalNetworkCleaner;
+import org.matsim.utils.objectattributes.attributable.AttributesUtils;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -35,9 +36,13 @@ public class TurnRestrictionsNetworkCleaner {
 
     public void colorNetwork(Network network, TurnRestrictionsContext turnRestrictions, String mode) {
 
+        // replaced links lose the mode below, remember which ones had it in the first place
+        Set<Id<Link>> replacedLinksWithMode = new HashSet<>();
+
         for (Link link : network.getLinks().values()) {
             if (turnRestrictions.replacedLinks.containsKey(link.getId())) {
                 if(link.getAllowedModes().contains(mode)) {
+                    replacedLinksWithMode.add(link.getId());
                     NetworkUtils.removeAllowedMode(link, mode);
                     DisallowedNextLinks disallowedNextLinks = NetworkUtils.getDisallowedNextLinks(link);
                     Verify.verifyNotNull(disallowedNextLinks);
@@ -60,6 +65,16 @@ public class TurnRestrictionsNetworkCleaner {
 
         Set<String> modeSingletonSet = Set.of(mode);
         for (TurnRestrictionsContext.ColoredLink coloredLink : turnRestrictions.coloredLinks) {
+            // the turn restriction context ignores allowed modes, but links that do not allow the mode
+            // must not become part of the (mode-specific) colored graph
+            Id<Link> originalLinkId = coloredLink.link.getId();
+            boolean allowsMode = turnRestrictions.replacedLinks.containsKey(originalLinkId)
+                    ? replacedLinksWithMode.contains(originalLinkId)
+                    : coloredLink.link.getAllowedModes().contains(mode);
+            if (!allowsMode) {
+                continue;
+            }
+
             Node fromNode;
             if (coloredLink.fromColoredNode != null) {
                 fromNode = network.getNodes().get(getColoredNodeId(coloredLink.fromColoredNode));
@@ -102,6 +117,7 @@ public class TurnRestrictionsNetworkCleaner {
             // colored node copy still present, but not the original
             if (network.getNodes().containsKey(nodeId) && !network.getNodes().containsKey(coloredNode.node().getId())) {
                 Node nodeCopy = NetworkUtils.createNode(coloredNode.node().getId(), coloredNode.node().getCoord());
+                AttributesUtils.copyAttributesFromTo(coloredNode.node(), nodeCopy);
                 network.addNode(nodeCopy);
                 for (TurnRestrictionsContext.ColoredLink coloredLink : coloredNode.inLinks()) {
                     if (network.getLinks().containsKey(coloredLink.link.getId())) {
@@ -249,7 +265,11 @@ public class TurnRestrictionsNetworkCleaner {
             for (TurnRestrictionsContext.ColoredLink link : toAdvance) {
                 List<Id<Link>> nextPath = new ArrayList<>(currentPath);
                 nextPath.add(link.link.getId());
-                if (turnRestrictions.replacedLinks.containsKey(link.link.getId())) {
+                TurnRestrictionsContext.ColoredLink replacedLink = turnRestrictions.replacedLinks.get(link.link.getId());
+                if (replacedLink != null && replacedLink.toColoredNode == link.toColoredNode) {
+                    // this link leaves the current colored subgraph and enters the one of the link's own
+                    // turn restrictions, which is handled when that link itself is processed.
+                    // But if the link stays inside the current colored subgraph, the restricted path continues here.
                     continue;
                 }
                 advance(link, nextPath, replacedStartLink, network, turnRestrictions, mode, visitedLinkIds);

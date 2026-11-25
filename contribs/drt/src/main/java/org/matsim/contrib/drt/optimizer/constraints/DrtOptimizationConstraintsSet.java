@@ -26,7 +26,9 @@ public abstract class DrtOptimizationConstraintsSet extends ReflectiveConfigGrou
             + " If false, the max travel and wait times are considered soft constraints (insertion of a request that"
             + " violates one of the constraints is allowed, but its cost is increased by additional penalty to make"
             + " it relatively less attractive). Penalisation of insertions can be customised by injecting a customised"
-            + " InsertionCostCalculator.PenaltyCalculator")
+            + " InsertionCostCalculator.PenaltyCalculator. Note that this only applies to the request being inserted:"
+            + " the constraints of already scheduled requests are never relaxed, so a new insertion must not delay a"
+            + " stop whose constraints are already violated.")
     public boolean rejectRequestIfMaxWaitOrTravelTimeViolated = true;
 
 
@@ -41,12 +43,23 @@ public abstract class DrtOptimizationConstraintsSet extends ReflectiveConfigGrou
 
     @Parameter
     @Comment(
+            "Minimum beeline distance (in meters) between the access and the egress link of a drt trip, measured between"
+                    + " the link coordinates. In a stopbased or serviceAreaBased system, these are the links of the chosen"
+                    + " access and egress stops, not the locations of the activities. In a door2door system, these are the links of the activities."
+                    + " Shorter trips are not served: routing returns null (in most cases caught by"
+                    + " the fallback routing module), and requests that reach the mobsim without having been routed in this"
+                    + " run are rejected. By default, this bound is disabled (i.e. set to 0).")
+    @PositiveOrZero
+    private double minimumTripDistance = 0;// [m]
+
+    @Parameter
+    @Comment(
             "Time before reaching a planned dropoff from which it is not allowed to insert new detours for new requests. I.e.," +
                     " if set to 180, then a vehicle will not divert to pickup or dropoff a new passenger once a boarded passenger is only " +
                     "3 minutes away from her destination, even though her time window would allow it." +
                     " Delayed detours just before arrival are usually perceived very negatively.")
     @PositiveOrZero
-    private double lateDiversionthreshold = 0; // [s];
+    private double lateDiversionThreshold = 0; // [s];
 
     @Parameter
     @Comment(
@@ -95,12 +108,21 @@ public abstract class DrtOptimizationConstraintsSet extends ReflectiveConfigGrou
     }
 
     @PositiveOrZero
-    public double getLateDiversionthreshold() {
-        return lateDiversionthreshold;
+    public double getMinimumTripDistance() {
+        return minimumTripDistance;
     }
 
-    public void setLateDiversionthreshold(@PositiveOrZero double lateDiversionthreshold) {
-        this.lateDiversionthreshold = lateDiversionthreshold;
+    public void setMinimumTripDistance(@PositiveOrZero double minimumTripDistance) {
+        this.minimumTripDistance = minimumTripDistance;
+    }
+
+    @PositiveOrZero
+    public double getLateDiversionThreshold() {
+        return lateDiversionThreshold;
+    }
+
+    public void setLateDiversionThreshold(@PositiveOrZero double lateDiversionThreshold) {
+        this.lateDiversionThreshold = lateDiversionThreshold;
     }
 
     @PositiveOrZero

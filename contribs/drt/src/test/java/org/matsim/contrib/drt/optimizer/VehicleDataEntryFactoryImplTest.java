@@ -87,7 +87,8 @@ public class VehicleDataEntryFactoryImplTest {
 				.build();
 
 		// stop duration == 0 --> pickup time == stop begin time
-		// ---> ride duration == 200 == max ride duration --> slack should be == 0
+		// ---> ride duration == 200 == max ride duration --> ride slack == 0 between pickup and dropoff.
+		// Before the pickup, only the time windows bind (slack 20 at the pickup stop).
 
 		pickupStop.getTask().addPickupRequest(mockRequest);
 		dropoffStop.getTask().addDropoffRequest(mockRequest);
@@ -100,7 +101,7 @@ public class VehicleDataEntryFactoryImplTest {
 		DvrpVehicle vehicle = vehicle(2000, 1000);
 
 		double[] slackTimes = computeSlackTimes(vehicle, 0, stops, null, precedingStayTimes);
-		assertThat(slackTimes).containsExactly(0, 0, 0, 1000);
+		assertThat(slackTimes).containsExactly(20, 20, 0, 1000);
 	}
 
 	@Test
@@ -134,8 +135,9 @@ public class VehicleDataEntryFactoryImplTest {
 		// initial vehicle slack == 1000
 		DvrpVehicle vehicle = vehicle(2000, 1000);
 
+		// ride slack == 10 between pickup and dropoff; before the pickup, only the time windows bind
 		double[] slackTimes = computeSlackTimes(vehicle, 0, stops, null, precedingStayTimes);
-		assertThat(slackTimes).containsExactly(10, 10, 10, 1000);
+		assertThat(slackTimes).containsExactly(20, 20, 10, 1000);
 	}
 
 
@@ -215,5 +217,343 @@ public class VehicleDataEntryFactoryImplTest {
 				.addTask(
 						new DrtStayTask(lastStayTaskBeginTime, Math.max(lastStayTaskBeginTime, vehicleEndTime), depot));
 		return vehicle;
+	}
+
+	/**
+	 * Test that slack calculation correctly handles multiple passengers with different ride duration constraints.
+	 * Verifies that the simplified algorithm (checking only dropoffs) produces correct slack propagation.
+	 */
+	@Test
+	void computeSlackTimes_multiplePassengers_tightestConstraintPropagates() {
+		// Scenario:
+		// Stop 0 (t=100): Pickup passenger A (maxRideDuration=300, loose constraint)
+		// Stop 1 (t=200): Pickup passenger B (maxRideDuration=100, tight constraint!)
+		// Stop 2 (t=300): Dropoff passenger A
+		// Stop 3 (t=350): Dropoff passenger B
+		//
+		// Current ride durations:
+		// - A: 300-100 = 200s (slack = 300-200 = 100s)
+		// - B: 350-200 = 150s (slack = 100-150 = -50s → 0s, violated!)
+		//
+		// Time windows are set very loose (1000s slack) so they don't interfere
+		// Expected: B's 0 slack should dominate at all stops after B's pickup
+
+		// stop(beginTime, latestArrivalTime, endTime, latestDepartureTime)
+		// Set time windows very loose: latestArrival = begin + 1000, latestDeparture = end + 1000
+		StopWaypoint pickupStopA = stop(100, 1100, 110, 1110);
+		StopWaypoint pickupStopB = stop(200, 1200, 210, 1210);
+		StopWaypoint dropoffStopA = stop(300, 1300, 310, 1310);
+		StopWaypoint dropoffStopB = stop(350, 1350, 360, 1360);
+
+		AcceptedDrtRequest requestA = AcceptedDrtRequest.newBuilder()
+				.request(DrtRequest.newBuilder().id(Id.create("reqA", Request.class)).build())
+				.maxRideDuration(300)
+				.plannedPickupTime(100.)
+				.plannedDropoffTime(300.)
+				.build();
+
+		AcceptedDrtRequest requestB = AcceptedDrtRequest.newBuilder()
+				.request(DrtRequest.newBuilder().id(Id.create("reqB", Request.class)).build())
+				.maxRideDuration(100)
+				.plannedPickupTime(200.)
+				.plannedDropoffTime(350.)
+				.build();
+
+		pickupStopA.getTask().addPickupRequest(requestA);
+		pickupStopB.getTask().addPickupRequest(requestB);
+		dropoffStopA.getTask().addDropoffRequest(requestA);
+		dropoffStopB.getTask().addDropoffRequest(requestB);
+
+		StopWaypoint[] stops = new StopWaypoint[] {pickupStopA, pickupStopB, dropoffStopA, dropoffStopB};
+		var precedingStayTimes = List.of(0.0, 0.0, 0.0, 0.0);
+
+		DvrpVehicle vehicle = vehicle(2000, 1000);
+
+		double[] slackTimes = computeSlackTimes(vehicle, 0, stops, null, precedingStayTimes);
+
+		// Expected slackTimes: [start, beforeStop0, beforeStop1, beforeStop2, beforeStop3, vehicle]
+		// Before stop 3 (dropoff B): A done, B on board: min(time_window=1000, B=0) = 0
+		// Before stop 2 (dropoff A): A and B on board: min(1000, A=100, B=0) = 0
+		// Before stop 1 (pickup B): only A on board: min(1000, A=100) = 100
+		// Before stop 0 (pickup A): nobody on board: time window = 1000
+		// Start: 1000
+		// Vehicle: 1000
+		assertThat(slackTimes).containsExactly(1000, 1000, 100, 0, 0, 1000);
+	}
+
+	/**
+	 * Test that when checking only dropoffs, we correctly capture constraints from passengers
+	 * picked up at intermediate stops.
+	 */
+	@Test
+	void computeSlackTimes_multiplePassengers_intermediatePickupConstraint() {
+		// Scenario:
+		// Stop 0 (t=100): Pickup A (maxRideDuration=400, loose)
+		// Stop 1 (t=200): Pickup B (maxRideDuration=200, moderate)
+		// Stop 2 (t=300): Pickup C (maxRideDuration=100, tight)
+		// Stop 3 (t=400): Dropoff A (slack = 400-300 = 100)
+		// Stop 4 (t=450): Dropoff B (slack = 200-250 = -50 → 0)
+		// Stop 5 (t=500): Dropoff C (slack = 100-200 = -100 → 0)
+		//
+		// Time windows are set very loose (1000s slack) so they don't interfere
+
+		StopWaypoint pickupStopA = stop(100, 1100, 110, 1110);
+		StopWaypoint pickupStopB = stop(200, 1200, 210, 1210);
+		StopWaypoint pickupStopC = stop(300, 1300, 310, 1310);
+		StopWaypoint dropoffStopA = stop(400, 1400, 410, 1410);
+		StopWaypoint dropoffStopB = stop(450, 1450, 460, 1460);
+		StopWaypoint dropoffStopC = stop(500, 1500, 510, 1510);
+
+		AcceptedDrtRequest requestA = AcceptedDrtRequest.newBuilder()
+				.request(DrtRequest.newBuilder().id(Id.create("reqA", Request.class)).build())
+				.maxRideDuration(400)
+				.plannedPickupTime(100.)
+				.plannedDropoffTime(400.)
+				.build();
+
+		AcceptedDrtRequest requestB = AcceptedDrtRequest.newBuilder()
+				.request(DrtRequest.newBuilder().id(Id.create("reqB", Request.class)).build())
+				.maxRideDuration(200)
+				.plannedPickupTime(200.)
+				.plannedDropoffTime(450.)
+				.build();
+
+		AcceptedDrtRequest requestC = AcceptedDrtRequest.newBuilder()
+				.request(DrtRequest.newBuilder().id(Id.create("reqC", Request.class)).build())
+				.maxRideDuration(100)
+				.plannedPickupTime(300.)
+				.plannedDropoffTime(500.)
+				.build();
+
+		pickupStopA.getTask().addPickupRequest(requestA);
+		pickupStopB.getTask().addPickupRequest(requestB);
+		pickupStopC.getTask().addPickupRequest(requestC);
+		dropoffStopA.getTask().addDropoffRequest(requestA);
+		dropoffStopB.getTask().addDropoffRequest(requestB);
+		dropoffStopC.getTask().addDropoffRequest(requestC);
+
+		StopWaypoint[] stops = new StopWaypoint[] {
+				pickupStopA, pickupStopB, pickupStopC, dropoffStopA, dropoffStopB, dropoffStopC
+		};
+		var precedingStayTimes = List.of(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+
+		DvrpVehicle vehicle = vehicle(2000, 1000);
+
+		double[] slackTimes = computeSlackTimes(vehicle, 0, stops, null, precedingStayTimes);
+
+		// Working backward:
+		// Before stop 5 (dropoff C): C on board: min(time_window=1000, C=max(0,100-200)) = 0
+		// Before stop 4 (dropoff B): B, C on board: 0
+		// Before stop 3 (dropoff A): A, B, C on board: 0
+		// Before stop 2 (pickup C): A, B on board: min(A=100, B=0) = 0
+		// Before stop 1 (pickup B): only A on board: 100
+		// Before stop 0 (pickup A): nobody on board: 1000
+		// Vehicle: 1000
+		assertThat(slackTimes).containsExactly(1000, 1000, 100, 0, 0, 0, 0, 1000);
+	}
+
+	/**
+	 * Test interaction between ride duration constraints and prebooked stay time buffers.
+	 * Stay time buffers should absorb delays without affecting the ride duration constraint.
+	 */
+	@Test
+	void computeSlackTimes_withRideDurationAndStayTimeBuffer() {
+		// Scenario:
+		// Stop 0 (t=100): Pickup A (maxRideDuration=300)
+		// Stay time: 50s before stop 1
+		// Stop 1 (t=200): Dropoff A (prebooked with buffer)
+		//
+		// Ride duration: 200-100 = 100s, slack = 300-100 = 200s
+		// Time windows set very loose (1000s) so they don't interfere
+
+		StopWaypoint pickupStop = stop(100, 1100, 110, 1110);
+		StopWaypoint dropoffStop = stop(200, 1200, 210, 1210);
+
+		AcceptedDrtRequest request = AcceptedDrtRequest.newBuilder()
+				.request(DrtRequest.newBuilder().id(Id.create("req", Request.class)).build())
+				.maxRideDuration(300)
+				.plannedPickupTime(100.)
+				.plannedDropoffTime(200.)
+				.build();
+
+		pickupStop.getTask().addPickupRequest(request);
+		dropoffStop.getTask().addDropoffRequest(request);
+
+		StopWaypoint[] stops = new StopWaypoint[] {pickupStop, dropoffStop};
+		var precedingStayTimes = List.of(0.0, 50.0);
+
+		DvrpVehicle vehicle = vehicle(2000, 1000);
+
+		double[] slackTimes = computeSlackTimes(vehicle, 0, stops, null, precedingStayTimes);
+
+		// Expected: [start, beforeStop0, beforeStop1, vehicle]
+		// Backward calculation:
+		// Before stop 1: min(time_window=1000, ride_slack=200) = 200, plus 50 stay = 250
+		// Before stop 0: passenger not yet on board, only the time window binds: 1000
+		// Start: 1000
+		// Vehicle: 1000
+		assertThat(slackTimes).containsExactly(1000, 1000, 250, 1000);
+	}
+
+	/**
+	 * A delay inserted before an existing request's pickup shifts its pickup and dropoff alike, so its max ride
+	 * duration must not restrict insertions there. A passenger already on board, in contrast, constrains all insertion
+	 * points up to the dropoff, including the start.
+	 */
+	@Test
+	void computeSlackTimes_rideDurationBindsOnlyAfterPickup() {
+		StopWaypoint pickupStopB = stop(100, 1100, 110, 1110);
+		StopWaypoint dropoffStopA = stop(200, 1200, 210, 1210);
+		StopWaypoint dropoffStopB = stop(300, 1300, 310, 1310);
+
+		// A is on board (pickup not part of the remaining stops), ride slack = 300 - (200 - 0) = 100
+		AcceptedDrtRequest requestA = AcceptedDrtRequest.newBuilder()
+				.request(DrtRequest.newBuilder().id(Id.create("reqA", Request.class)).build())
+				.maxRideDuration(300)
+				.plannedPickupTime(0.)
+				.plannedDropoffTime(200.)
+				.build();
+
+		// B is picked up at stop 0, ride slack = 220 - (300 - 100) = 20
+		AcceptedDrtRequest requestB = AcceptedDrtRequest.newBuilder()
+				.request(DrtRequest.newBuilder().id(Id.create("reqB", Request.class)).build())
+				.maxRideDuration(220)
+				.plannedPickupTime(100.)
+				.plannedDropoffTime(300.)
+				.build();
+
+		pickupStopB.getTask().addPickupRequest(requestB);
+		dropoffStopA.getTask().addDropoffRequest(requestA);
+		dropoffStopB.getTask().addDropoffRequest(requestB);
+
+		StopWaypoint[] stops = new StopWaypoint[] {pickupStopB, dropoffStopA, dropoffStopB};
+		var precedingStayTimes = List.of(0.0, 0.0, 0.0);
+
+		DvrpVehicle vehicle = vehicle(2000, 1000);
+
+		double[] slackTimes = computeSlackTimes(vehicle, 0, stops, null, precedingStayTimes);
+
+		// [start, beforeStop0, beforeStop1, beforeStop2, vehicle]
+		// Before stop 2: B on board: 20
+		// Before stop 1: A and B on board: min(100, 20) = 20
+		// Before stop 0: only A on board (B's ride does not grow): 100
+		// Start: A on board: 100
+		assertThat(slackTimes).containsExactly(100, 100, 20, 20, 1000);
+	}
+
+	/**
+	 * A request being picked up at the ongoing start stop is treated like an on-board passenger: extending the start
+	 * stop prolongs its ride.
+	 */
+	@Test
+	void computeSlackTimes_rideDurationOfPickupAtStartStopBindsStart() {
+		StopWaypoint startStop = stop(0, 1000, 10, 1010);
+		StopWaypoint dropoffStop = stop(100, 1100, 110, 1110);
+
+		// ride slack = 130 - (100 - 0) = 30
+		AcceptedDrtRequest request = AcceptedDrtRequest.newBuilder()
+				.request(DrtRequest.newBuilder().id(Id.create("req", Request.class)).build())
+				.maxRideDuration(130)
+				.plannedPickupTime(0.)
+				.plannedDropoffTime(100.)
+				.build();
+
+		startStop.getTask().addPickupRequest(request);
+		dropoffStop.getTask().addDropoffRequest(request);
+
+		double[] slackTimes = computeSlackTimes(vehicle(2000, 1000), 5, new StopWaypoint[] {dropoffStop}, startStop,
+				List.of(0.0));
+
+		assertThat(slackTimes).containsExactly(30, 30, 1000);
+	}
+
+	/**
+	 * A late stop (planned arrival after its latest arrival time) yields a negative slack. The reported slack is capped
+	 * at 0 so that insertions without time loss remain feasible, while upstream stay times first absorb the existing
+	 * delay.
+	 */
+	@Test
+	void computeSlackTimes_lateStop_cappedAtZero() {
+		StopWaypoint stop0 = stop(100, 1100, 110, 1110);
+		// arrives at 300 but must arrive by 250: 50 s late
+		StopWaypoint lateStop = stop(300, 250, 310, 1310);
+		StopWaypoint[] stops = new StopWaypoint[] {stop0, lateStop};
+		DvrpVehicle vehicle = vehicle(2000, 1000);
+
+		// no stay: 0 everywhere upstream of the late stop
+		assertThat(computeSlackTimes(vehicle, 0, stops, null, List.of(0.0, 0.0))).containsExactly(0, 0, 0, 1000);
+
+		// a 30 s stay before stop 0 only absorbs part of the 50 s delay: still 0, not 30
+		assertThat(computeSlackTimes(vehicle, 0, stops, null, List.of(30.0, 0.0))).containsExactly(0, 0, 0, 1000);
+
+		// an 80 s stay absorbs the delay and leaves 30 s
+		assertThat(computeSlackTimes(vehicle, 0, stops, null, List.of(80.0, 0.0))).containsExactly(30, 30, 0, 1000);
+	}
+
+	/**
+	 * Two requests dropped off at the same stop: the tighter ride slack binds between the later pickup and the shared
+	 * dropoff, the looser one alone between the two pickups.
+	 */
+	@Test
+	void computeSlackTimes_sharedDropoffStop() {
+		StopWaypoint pickupStopA = stop(100, 1100, 110, 1110);
+		StopWaypoint pickupStopB = stop(200, 1200, 210, 1210);
+		StopWaypoint sharedDropoffStop = stop(300, 1300, 310, 1310);
+
+		// ride slack A = 300 - (300 - 100) = 100
+		AcceptedDrtRequest requestA = AcceptedDrtRequest.newBuilder()
+				.request(DrtRequest.newBuilder().id(Id.create("reqA", Request.class)).build())
+				.maxRideDuration(300)
+				.plannedPickupTime(100.)
+				.plannedDropoffTime(300.)
+				.build();
+
+		// ride slack B = 120 - (300 - 200) = 20
+		AcceptedDrtRequest requestB = AcceptedDrtRequest.newBuilder()
+				.request(DrtRequest.newBuilder().id(Id.create("reqB", Request.class)).build())
+				.maxRideDuration(120)
+				.plannedPickupTime(200.)
+				.plannedDropoffTime(300.)
+				.build();
+
+		pickupStopA.getTask().addPickupRequest(requestA);
+		pickupStopB.getTask().addPickupRequest(requestB);
+		sharedDropoffStop.getTask().addDropoffRequest(requestA);
+		sharedDropoffStop.getTask().addDropoffRequest(requestB);
+
+		StopWaypoint[] stops = new StopWaypoint[] {pickupStopA, pickupStopB, sharedDropoffStop};
+		double[] slackTimes = computeSlackTimes(vehicle(2000, 1000), 0, stops, null, List.of(0.0, 0.0, 0.0));
+
+		// [start, beforeStop0, beforeStop1, beforeStop2, vehicle]
+		// Before stop 2: A and B on board: min(100, 20) = 20
+		// Before stop 1: only A on board: 100
+		// Before stop 0: nobody on board: time window = 1000
+		assertThat(slackTimes).containsExactly(1000, 1000, 100, 20, 1000);
+	}
+
+	/**
+	 * A request picked up and dropped off at the same stop never rides across an insertion point, so its ride slack
+	 * does not restrict any insertion.
+	 */
+	@Test
+	void computeSlackTimes_pickupAndDropoffAtSameStop() {
+		StopWaypoint sameStop = stop(100, 1100, 110, 1110);
+		StopWaypoint laterStop = stop(200, 1200, 210, 1210);
+
+		// ride slack would be 0
+		AcceptedDrtRequest request = AcceptedDrtRequest.newBuilder()
+				.request(DrtRequest.newBuilder().id(Id.create("req", Request.class)).build())
+				.maxRideDuration(0)
+				.plannedPickupTime(110.)
+				.plannedDropoffTime(110.)
+				.build();
+
+		sameStop.getTask().addPickupRequest(request);
+		sameStop.getTask().addDropoffRequest(request);
+
+		StopWaypoint[] stops = new StopWaypoint[] {sameStop, laterStop};
+		double[] slackTimes = computeSlackTimes(vehicle(2000, 1000), 0, stops, null, List.of(0.0, 0.0));
+
+		assertThat(slackTimes).containsExactly(1000, 1000, 1000, 1000);
 	}
 }

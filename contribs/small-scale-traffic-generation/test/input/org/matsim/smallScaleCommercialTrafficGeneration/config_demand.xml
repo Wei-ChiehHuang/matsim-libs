@@ -35,17 +35,6 @@
 	</module>
 	<module name="scoring">
 		<param name="fractionOfIterationsToStartScoreMSA" value="0.8"/>
-		<parameterset type="modeParams" >
-			<!-- [utils] alternative-specific constant.  Normally per trip, but that is probably buggy for multi-leg trips. -->
-			<param name="constant" value="0.56" />
-			<!-- [unit_of_money/day] Fixed cost of mode, per day. -->
-			<param name="dailyMonetaryConstant" value="-3.0" />
-			<!-- [utils/hr] additional marginal utility of traveling.  normally negative.  this comes on top of the opportunity cost of time -->
-			<param name="marginalUtilityOfTraveling_util_hr" value="0.0" />
-			<param name="mode" value="car" />
-			<!-- [unit_of_money/m] conversion of distance into money. Normally negative. -->
-			<param name="monetaryDistanceRate" value="-1.49E-4" />
-		</parameterset>
 	</module>
 	<module name="replanning">
 		<param name="fractionOfIterationsToDisableInnovation" value="0.8" />
@@ -64,12 +53,12 @@
 		<!-- If vehicles should all be the same default vehicle, or come from the vehicles file, or something else.  Possible values:  defaultVehicle modeVehicleTypesFromVehiclesData fromVehiclesData -->
 		<param name="vehiclesSource" value="modeVehicleTypesFromVehiclesData" />
 		<param name="usePersonIdForMissingVehicleId" value="true" />
+		<param name="mainMode" value="car,truck8t,truck18t,truck40t" />
 	</module>
 	<module name="network" >
 		<!-- The Coordinates Reference System in which the coordinates are expressed in the input file. At import, the coordinates will be converted to the coordinate system defined in "global", and willbe converted back at export. If not specified, no conversion happens. -->
-		<param name="inputCRS" value="EPSG:4326" />
+		<param name="inputCRS" value="Atlantis" />
 		<param name="inputChangeEventsFile" value="null" />
-		<param name="inputNetworkFile" value="https://raw.githubusercontent.com/matsim-org/matsim-libs/master/examples/scenarios/freight-chessboard-9x9/grid9x9.xml" />
 		<param name="laneDefinitionsFile" value="null" />
 		<param name="timeVariantNetwork" value="false" />
 	</module>

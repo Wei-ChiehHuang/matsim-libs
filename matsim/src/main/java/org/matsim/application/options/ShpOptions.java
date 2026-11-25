@@ -112,6 +112,7 @@ public final class ShpOptions {
 	 * Opens datastore to a shape-file.
 	 */
 	public static DataStore openDataStore(String shp) throws IOException {
+		/// Seems to duplicate functionality that is also in {@link org.matsim.utils.gis.shp2matsim.ShpGeometryUtils}.
 
 		FileDataStoreFactorySpi factory = new ShapefileDataStoreFactory();
 
@@ -145,7 +146,7 @@ public final class ShpOptions {
 
 			// Zip files will only work with local files
 			URI uri;
-			try (ZipInputStream zip = new ZipInputStream(IOUtils.getInputStream(url))) {
+			try (ZipInputStream zip = new ZipInputStream(url.openStream())) {
 
 				ZipEntry entry;
 				while ((entry = zip.getNextEntry()) != null) {

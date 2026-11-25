@@ -1,6 +1,10 @@
 package org.matsim.contrib.drt.prebooking;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -83,6 +87,30 @@ public class PrebookingTest {
 		}
 
 		return drtConfig.getPrebookingParams().get();
+	}
+
+	@Test
+	void requestSubmittedAtTheDepartureTime() {
+		/*-
+		 * The prebooked request is submitted in the same time step in which the passenger departs. The departure must
+		 * use the prebooked request and must not create a second (immediate) request.
+		 */
+
+		PrebookingTestEnvironment environment = new PrebookingTestEnvironment(utils) //
+				.addVehicle("vehicleA", 1, 1) //
+				.addRequest("personA", 0, 0, 5, 5, 2000.0, 2000.0) //
+				.configure(600.0, 1.3, 600.0, 60.0) //
+				.endTime(10.0 * 3600.0);
+
+		Controler controller = environment.build();
+		installPrebooking(controller);
+		controller.run();
+
+		RequestInfo requestInfo = environment.getRequestInfo().get("personA");
+		assertEquals(List.of(2000.0), requestInfo.submissionTimes);
+		assertTrue(requestInfo.drtRequestId.toString().contains("prebooked"));
+		assertFalse(requestInfo.rejected);
+		assertTrue(Double.isFinite(requestInfo.dropoffTime));
 	}
 
 	@Test
@@ -350,15 +378,15 @@ public class PrebookingTest {
 	}
 
 	@Test
-	void sameTrip_splitPickup() {
+	void sameTrip_mergePickup() {
 		/*-
 		 * Two requests with the same origin and destination, different departure times.
 		 * - First, A is submitted with departure time 2000
 		 * - Then, B is submitted with departure time 2080
 		 * - Stop for A goes from 2000 to 2060
 		 * - Stop for B goes from 2080 to 20140
-		 * - The requests don't overlap, so we schedule individual stops (in a more extreme use case we could schedule things in between then)
-		 * - In total three stops (P, P, D)
+		 * - The requests don't overlap but PU stop for A can be extended
+		 * - In total two stops (P, D)
 		 */
 
 		PrebookingTestEnvironment environment = new PrebookingTestEnvironment(utils) //
@@ -379,21 +407,21 @@ public class PrebookingTest {
 			assertEquals(2000.0 + 60.0 + 1.0, requestInfo.pickupTime, 1e-3);
 
 			// Dropoff a bit later than before because we pickup another one on the way
-			assertEquals(2310.0, requestInfo.dropoffTime, 1e-3);
+			assertEquals(2309.0, requestInfo.dropoffTime, 1e-3);
 		}
 
 		{
 			RequestInfo requestInfo = environment.getRequestInfo().get("requestB");
 			assertEquals(1100.0, requestInfo.submissionTime, 1e-3);
 			// We insert a later pickup
-			assertEquals(2080.0 + 60.0 + 1.0, requestInfo.pickupTime, 1e-3);
+			assertEquals(2080.0 + 60.0, requestInfo.pickupTime, 1e-3);
 
 			// Dropoff as planned
-			assertEquals(2310.0, requestInfo.dropoffTime, 1e-3);
+			assertEquals(2309.0, requestInfo.dropoffTime, 1e-3);
 		}
 
-		// Three stops, 2x pickup, 1x dropoff
-		assertEquals(3, environment.getTaskInfo().get("vehicleA").stream().filter(t -> t.type.equals("STOP")).count());
+		// Two stops, 1x pickup, 1x dropoff
+		assertEquals(2, environment.getTaskInfo().get("vehicleA").stream().filter(t -> t.type.equals("STOP")).count());
 	}
 
 	@Test
@@ -580,8 +608,8 @@ public class PrebookingTest {
 		{
 			RequestInfo requestInfo = environment.getRequestInfo().get("requestB");
 			assertEquals(1.0, requestInfo.submissionTime, 1e-3);
-			assertEquals(8000.0 + 60.0 + 1.0, requestInfo.pickupTime, 1e-3);
-			assertEquals(8230.0, requestInfo.dropoffTime, 1e-3);
+			assertEquals(8000.0 + 60.0, requestInfo.pickupTime, 1e-3);
+			assertEquals(8229.0, requestInfo.dropoffTime, 1e-3);
 		}
 
 		{
@@ -591,7 +619,7 @@ public class PrebookingTest {
 			assertEquals(1188.0, requestInfo.dropoffTime, 1e-3);
 		}
 
-		assertEquals(4, environment.getTaskInfo().get("vehicleA").stream().filter(t -> t.type.equals("STOP")).count());
+		assertEquals(3, environment.getTaskInfo().get("vehicleA").stream().filter(t -> t.type.equals("STOP")).count());
 	}
 
 	@Test

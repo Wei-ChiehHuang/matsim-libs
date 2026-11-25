@@ -28,6 +28,10 @@ import org.matsim.api.core.v01.network.Link;
 import org.matsim.freight.carriers.TimeWindow;
 import org.matsim.freight.logistics.LSPDataObject;
 
+/**
+ * Default implementation of {@link LspShipment}. Instances are created through
+ * {@link LspShipmentUtils.LspShipmentBuilder}.
+ */
 class LspShipmentImpl extends LSPDataObject<LspShipment> implements LspShipment {
 
   private final Id<Link> fromLinkId;
@@ -37,12 +41,9 @@ class LspShipmentImpl extends LSPDataObject<LspShipment> implements LspShipment 
   private final int capacityDemand;
   private final double deliveryServiceTime;
   private final double pickupServiceTime;
-  //	private final ShipmentPlan shipmentPlan;
   @Deprecated // This will be removed in the future and replaced by using the events. KMT, Mai'23
   private final LspShipmentPlan shipmentLog;
   private final List<LspShipmentRequirement> lspShipmentRequirements;
-
-  //	private Id<LSP> lspId;
 
   LspShipmentImpl(LspShipmentUtils.LspShipmentBuilder builder) {
     super(builder.id);
@@ -53,7 +54,6 @@ class LspShipmentImpl extends LSPDataObject<LspShipment> implements LspShipment 
     this.capacityDemand = builder.capacityDemand;
     this.deliveryServiceTime = builder.deliveryServiceTime;
     this.pickupServiceTime = builder.pickupServiceTime;
-    //		this.shipmentPlan = new ShipmentPlanImpl(this.getId());
     this.shipmentLog = new LspShipmentPlanImpl(this.getId());
     this.lspShipmentRequirements = new ArrayList<>();
     this.lspShipmentRequirements.addAll(builder.lspShipmentRequirements);
@@ -79,10 +79,12 @@ class LspShipmentImpl extends LSPDataObject<LspShipment> implements LspShipment 
     return endTimeWindow;
   }
 
-    @Deprecated // This will be removed in the future and replaced by using the events. KMT, Mai'23
-	//Consider changing this ShipmentLog to MATSim's experienced plans.
-	//This would be closer to MATSim and makes clear that this is what happened in the simulation. kmt/kn jan'25
+  /** @deprecated the shipment log is superseded by the shipment plan elements ({@link LspShipmentLeg}).
+   * This will be removed in the future and replaced by using the events. KMT, Mai'23
+   * Consider changing this ShipmentLog to MATSim's experienced plans.
+   * This would be closer to MATSim and makes clear that this is what happened in the simulation. kmt/kn jan'25*/
   @Override
+  @Deprecated
   public LspShipmentPlan getShipmentLog() {
     return shipmentLog;
   }
@@ -124,16 +126,10 @@ class LspShipmentImpl extends LSPDataObject<LspShipment> implements LspShipment 
         + startTimeWindow
         + "\t endTimeWindow="
         + endTimeWindow
-        + "\t capacityDemand="
-        + capacityDemand
         + "\t deliveryServiceTime="
         + deliveryServiceTime
         + "\t pickupServiceTime="
         + pickupServiceTime
-        +
-        //				"\t schedule=" + schedule +
-        //				"\t log=" + log +
-        //				"\t requirements=" + requirements +
-        '}';
+        + '}';
   }
 }

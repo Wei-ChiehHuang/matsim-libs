@@ -35,6 +35,7 @@ import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
+import org.matsim.core.config.groups.ControllerConfigGroup;
 import org.matsim.core.config.groups.VspExperimentalConfigGroup;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controller;
@@ -112,16 +113,16 @@ public class MultipleIterationsCollectionLSPScoringTest {
 		collectionElementBuilder.setResource(collectionResource);
 		LogisticChainElement collectionElement = collectionElementBuilder.build();
 
-		Id<LogisticChain> collectionSolutionId = Id.create("CollectionSolution", LogisticChain.class);
-		LSPUtils.LogisticChainBuilder collectionSolutionBuilder = LSPUtils.LogisticChainBuilder
-				.newInstance(collectionSolutionId);
-		collectionSolutionBuilder.addLogisticChainElement(collectionElement);
-		LogisticChain collectionSolution = collectionSolutionBuilder.build();
+		Id<LogisticChain> collectionChainId = Id.create("CollectionChain", LogisticChain.class);
+		LSPUtils.LogisticChainBuilder collectionChainBuilder = LSPUtils.LogisticChainBuilder
+				.newInstance(collectionChainId);
+		collectionChainBuilder.addLogisticChainElement(collectionElement);
+		LogisticChain collectionChain = collectionChainBuilder.build();
 
 		InitialShipmentAssigner assigner = ResourceImplementationUtils.createSingleLogisticChainShipmentAssigner();
 		LSPPlan collectionPlan = LSPUtils.createLSPPlan();
 		collectionPlan.setInitialShipmentAssigner(assigner);
-		collectionPlan.addLogisticChain(collectionSolution);
+		collectionPlan.addLogisticChain(collectionChain);
 
 		LSPUtils.LSPBuilder collectionLSPBuilder = LSPUtils.LSPBuilder.getInstance(Id.create("CollectionLSP", LSP.class));
 		collectionLSPBuilder.setInitialPlan(collectionPlan);
@@ -160,6 +161,7 @@ public class MultipleIterationsCollectionLSPScoringTest {
 			TimeWindow startTimeWindow = TimeWindow.newInstance(0, (24 * 3600));
 			builder.setStartTimeWindow(startTimeWindow);
 			builder.setDeliveryServiceTime(capacityDemand * 60);
+			builder.setPickupServiceTime(capacityDemand * 60);
 			LspShipment shipment = builder.build();
 			collectionLSP.assignShipmentToLspPlan(shipment);
 		}
@@ -184,6 +186,7 @@ public class MultipleIterationsCollectionLSPScoringTest {
 		config.controller().setLastIteration(10);
 		config.controller().setOverwriteFileSetting(OverwriteFileSetting.deleteDirectoryIfExists);
 		config.controller().setOutputDirectory(utils.getOutputDirectory());
+		config.controller().setCompressionType(ControllerConfigGroup.CompressionType.gzip);
 		//The VSP default settings are designed for person transport simulation. After talking to Kai, they will be set to WARN here. Kai MT may'23
 		controller.getConfig().vspExperimental().setVspDefaultsCheckingLevel(VspExperimentalConfigGroup.VspDefaultsCheckingLevel.warn);
 		controller.run();

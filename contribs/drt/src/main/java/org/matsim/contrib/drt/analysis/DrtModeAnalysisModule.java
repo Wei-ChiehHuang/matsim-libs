@@ -23,13 +23,15 @@ package org.matsim.contrib.drt.analysis;
 import java.awt.Color;
 import java.awt.Paint;
 import java.util.Comparator;
-import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Predicate;
 
 import com.google.inject.Provider;
 import com.google.inject.TypeLiteral;
-import org.locationtech.jts.geom.prep.PreparedGeometry;
+import com.google.inject.multibindings.OptionalBinder;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.contrib.common.zones.Zone;
 import org.matsim.contrib.common.zones.ZoneSystem;
@@ -37,7 +39,9 @@ import org.matsim.contrib.common.zones.ZoneSystemParams;
 import org.matsim.contrib.common.zones.ZoneSystemUtils;
 import org.matsim.contrib.drt.analysis.zonal.DrtZonalWaitTimesAnalyzer;
 import org.matsim.contrib.drt.analysis.zonal.ZonalIdleVehicleXYVisualiser;
+import org.matsim.contrib.common.timeprofile.ProfileWriter;
 import org.matsim.contrib.drt.run.DrtConfigGroup;
+import org.matsim.contrib.drt.run.DrtServiceAreas;
 import org.matsim.contrib.drt.schedule.DefaultDrtStopTask;
 import org.matsim.contrib.drt.schedule.DrtDriveTask;
 import org.matsim.contrib.drt.schedule.DrtStayTask;
@@ -49,21 +53,21 @@ import org.matsim.contrib.dvrp.fleet.FleetSpecification;
 import org.matsim.contrib.dvrp.load.DvrpLoadType;
 import org.matsim.contrib.dvrp.run.AbstractDvrpModeModule;
 import org.matsim.contrib.dvrp.schedule.Task;
-import org.matsim.contrib.common.timeprofile.ProfileWriter;
 import org.matsim.contrib.dvrp.analysis.VehicleOccupancyProfileCalculator;
 import org.matsim.contrib.dvrp.analysis.VehicleOccupancyProfileView;
 import org.matsim.contrib.dvrp.analysis.VehicleTaskProfileCalculator;
 import org.matsim.contrib.dvrp.analysis.VehicleTaskProfileView;
 import org.matsim.core.api.experimental.events.EventsManager;
 import org.matsim.core.config.Config;
-import org.matsim.core.config.ConfigGroup;
 import org.matsim.core.config.groups.QSimConfigGroup;
 import org.matsim.core.controler.MatsimServices;
 import org.matsim.core.controler.OutputDirectoryHierarchy;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import org.matsim.utils.gis.shp2matsim.ShpGeometryUtils;
+import java.awt.*;
+import java.util.Comparator;
+import java.util.Map;
 
 /**
  * @author michalm (Michal Maciejewski)
@@ -120,8 +124,12 @@ public class DrtModeAnalysisModule extends AbstractDvrpModeModule {
 		addEventHandlerBinding().to(modalKey(DrtVehicleDistanceStats.class));
 
 		bindModal(DrtEventSequenceCollector.class).toProvider(modalProvider(getter -> new DrtEventSequenceCollector(drtCfg.getMode())))
-				.asEagerSingleton();
+			.asEagerSingleton();
 		addEventHandlerBinding().to(modalKey(DrtEventSequenceCollector.class));
+
+		// Only the head node performs most of the analysis
+		if (!getSimulationContext().getComputeNode().isHeadNode())
+			return;
 
 		bindModal(VehicleOccupancyProfileCalculator.class).toProvider(modalProvider(
 				getter -> new VehicleOccupancyProfileCalculator(getMode(), getter.getModal(FleetSpecification.class), 300,
@@ -132,13 +140,13 @@ public class DrtModeAnalysisModule extends AbstractDvrpModeModule {
 			MatsimServices matsimServices = getter.get(MatsimServices.class);
 			String mode = drtCfg.getMode();
 			var profileView = new VehicleOccupancyProfileView(getter.getModal(VehicleOccupancyProfileCalculator.class),
-					nonPassengerTaskTypeComparator, taskTypePaints);
+				nonPassengerTaskTypeComparator, taskTypePaints);
 			return new ProfileWriter(matsimServices, mode, profileView, "occupancy_time_profiles");
 		}));
 
 		bindModal(VehicleTaskProfileCalculator.class).toProvider(modalProvider(
-				getter -> new VehicleTaskProfileCalculator(getMode(), getter.getModal(FleetSpecification.class), 300,
-						getter.get(QSimConfigGroup.class)))).asEagerSingleton();
+			getter -> new VehicleTaskProfileCalculator(getMode(), getter.getModal(FleetSpecification.class), 300,
+				getter.get(QSimConfigGroup.class)))).asEagerSingleton();
 		addEventHandlerBinding().to(modalKey(VehicleTaskProfileCalculator.class));
 
 		addControllerListenerBinding().toProvider(modalProvider(getter -> {
@@ -165,17 +173,14 @@ public class DrtModeAnalysisModule extends AbstractDvrpModeModule {
 			getter.getModal(DvrpLoadType.class))));
 
 
+		// bound in DrtModeRoutingModule, which is installed alongside
+		OptionalBinder.newOptionalBinder(binder(), modalKey(DrtServiceAreas.class));
+
 		modalMapBinder(String.class, ZoneSystem.class).addBinding(ANALYSIS_ZONE_SYSTEM).toProvider(modalProvider(getter -> {
 			Network network = getter.getModal(Network.class);
-			Predicate<Zone> zoneFilter;
-			if(drtCfg.getOperationalScheme() == DrtConfigGroup.OperationalScheme.serviceAreaBased) {
-				List<PreparedGeometry> serviceAreaGeoms = ShpGeometryUtils.loadPreparedGeometries(
-						ConfigGroup.getInputFileURL(this.getConfig().getContext(), this.drtCfg.getDrtServiceAreaShapeFile()));
-				zoneFilter = zone -> serviceAreaGeoms.stream()
-						.anyMatch((serviceArea) -> serviceArea.intersects(zone.getPreparedGeometry().getGeometry()));
-			} else {
-				zoneFilter = zone -> true;
-			}
+			Predicate<Zone> zoneFilter = DrtServiceAreas.servedAreaZoneFilter(getConfig(), drtCfg,
+					getter.getModal(new TypeLiteral<Optional<DrtServiceAreas>>() {
+					}));
 			String crs = getConfig().global().getCoordinateSystem();
 			ZoneSystemParams zoneSystemParams = drtCfg.addOrGetAnalysisZoneSystemParams();
 			return ZoneSystemUtils.createZoneSystem(getConfig().getContext(), network, zoneSystemParams, crs, zoneFilter);

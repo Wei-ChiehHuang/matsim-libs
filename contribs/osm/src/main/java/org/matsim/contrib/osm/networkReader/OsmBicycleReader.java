@@ -4,6 +4,7 @@ import org.matsim.api.core.v01.Coord;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.TransportMode;
 import org.matsim.api.core.v01.network.Link;
+import org.matsim.core.network.NetworkUtils;
 
 import java.util.*;
 import java.util.concurrent.Executors;
@@ -77,13 +78,30 @@ public final class OsmBicycleReader extends SupersonicOsmNetworkReader {
 	}
 
 	private static void setCycleWay(Link link, Map<String, String> tags) {
-		if (tags.containsKey(OsmTags.CYCLEWAY))
-			link.getAttributes().putAttribute(OsmTags.CYCLEWAY, tags.get(OsmTags.CYCLEWAY));
-	}
+        // Note: this logic assumes right-hand traffic.
+        // For forward links, the right side corresponds to the link direction.
+        // For reverse links, the left side corresponds to the link direction.
+        String cycleway = null;
+        String linkId = link.getId().toString();
+
+        if (tags.containsKey(OsmTags.CYCLEWAY)) {
+            cycleway = tags.get(OsmTags.CYCLEWAY);
+        } else if (tags.containsKey(OsmTags.CYCLEWAY_BOTH)) {
+            cycleway = tags.get(OsmTags.CYCLEWAY_BOTH);
+        } else if (linkId.endsWith("f") && tags.containsKey(OsmTags.CYCLEWAY_RIGHT)) {
+            cycleway = tags.get(OsmTags.CYCLEWAY_RIGHT);
+        } else if ((linkId.endsWith("r") || linkId.endsWith("_bike-reverse")) && tags.containsKey(OsmTags.CYCLEWAY_LEFT)) {
+            cycleway = tags.get(OsmTags.CYCLEWAY_LEFT);
+        }
+
+        if (cycleway != null) {
+            link.getAttributes().putAttribute(OsmTags.CYCLEWAY, cycleway);
+        }
+    }
 
 	private static void setRestrictions(Link link, Map<String, String> tags) {
 		if (tags.containsKey(OsmTags.BICYCLE))
-			link.getAttributes().putAttribute(TransportMode.bike, tags.get(OsmTags.BICYCLE));
+			link.getAttributes().putAttribute(OsmTags.BICYCLE, tags.get(OsmTags.BICYCLE));
 	}
 
 	@Override
@@ -98,7 +116,14 @@ public final class OsmBicycleReader extends SupersonicOsmNetworkReader {
 
 			// test whether the reverse link is actually reverse relative to the segment
 			Direction direction = reverseLink.getFromNode().getId().equals(Id.createNodeId(segment.getFromNode().getId())) ? Direction.Forward : Direction.Reverse;
-			this.afterLinkCreated.accept(link, segment.getTags(), direction);
+
+			// the geometry copied over from the other link runs the other way
+			if (reverseLink.getAttributes().getAttribute(NetworkUtils.ORIG_GEOM) != null) {
+				reverseLink.getAttributes().putAttribute(NetworkUtils.ORIG_GEOM, getOriginalGeometry(segment.getNodesForSegment(), direction));
+			}
+
+			// the other link went through the callback when it was created, this one has not
+			this.afterLinkCreated.accept(reverseLink, segment.getTags(), direction);
 		}
 		return links;
 	}

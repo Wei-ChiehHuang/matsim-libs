@@ -49,18 +49,18 @@ import org.matsim.freight.logistics.shipment.LspShipmentUtils;
 import org.matsim.vehicles.VehicleType;
 import org.matsim.vehicles.VehicleUtils;
 
-/* Example for customized scoring. Each customer that is visited will give a random tip between zero and five
- *
- *
+/**
+ * Example for customized scoring in which each visited customer grants a random tip between zero
+ * and five. The example demonstrates registering an {@link LSPScorer} that also reacts to
+ * carrier service end events to accumulate the tips.
  */
-
 /*package-private*/ final class ExampleLSPScoring {
 
   private ExampleLSPScoring() {}
 
   private static LSP createLSPWithScorer(Scenario scenario) {
 
-    // The Carrier for the resource of the sole LogisticsSolutionElement of the LSP is created
+    // The Carrier for the resource of the sole LogisticChainElement of the LSP is created
     final VehicleType carrierVehType = VehicleUtils.createVehicleType( Id.create("CollectionCarrierVehicleType", VehicleType.class), TransportMode.car);
     carrierVehType.getCapacity().setOther(10);
     carrierVehType.getCostInformation().setCostsPerMeter(0.0004);
@@ -89,29 +89,29 @@ import org.matsim.vehicles.VehicleUtils;
             .setLocationLinkId(collectionLinkId)
             .build();
 
-    // The adapter is now inserted into the only LogisticsSolutionElement of the only
-    // LogisticsSolution of the LSP
+    // The adapter is now inserted into the only LogisticChainElement of the only
+    // LogisticChain of the LSP
     LogisticChainElement logisticChainElement =
         LSPUtils.LogisticChainElementBuilder.newInstance(
                 Id.create("CollectionElement", LogisticChainElement.class))
             .setResource(lspResource)
             .build();
 
-    // The LogisticsSolutionElement is now inserted into the only LogisticsSolution of the LSP
+    // The LogisticChainElement is now inserted into the only LogisticChain of the LSP
     LogisticChain logisticChain =
         LSPUtils.LogisticChainBuilder.newInstance(
-                Id.create("CollectionSolution", LogisticChain.class))
+                Id.create("CollectionChain", LogisticChain.class))
             .addLogisticChainElement(logisticChainElement)
             .build();
 
-    // The initial plan of the lsp is generated and the assigner and the solution from above are
+    // The initial plan of the lsp is generated and the assigner and the chain from above are
     // added
     LSPPlan lspPlan =
         LSPUtils.createLSPPlan()
             .setInitialShipmentAssigner(ResourceImplementationUtils.createSingleLogisticChainShipmentAssigner())
             .addLogisticChain(logisticChain);
 
-    // The exogenous list of Resources for the SolutionScheduler is compiled and the Scheduler is
+    // The exogenous list of Resources for the LogisticChainScheduler is compiled and the Scheduler is
     // added to the LSPBuilder
 
     return LSPUtils.LSPBuilder.getInstance(Id.create("CollectionLSP", LSP.class))
@@ -153,6 +153,7 @@ import org.matsim.vehicles.VehicleUtils;
       TimeWindow startTimeWindow = TimeWindow.newInstance(0, (24 * 3600));
       builder.setStartTimeWindow(startTimeWindow);
       builder.setDeliveryServiceTime(capacityDemand * 60);
+      builder.setPickupServiceTime(capacityDemand * 60);
       shipmentList.add(builder.build());
     }
     return shipmentList;
@@ -166,8 +167,8 @@ import org.matsim.vehicles.VehicleUtils;
 
     Controller controller = prepareController(scenario);
 
-    // The VSP default settings are designed for person transport simulation. After talking to Kai,
-    // they will be set to WARN here. Kai MT may'23
+    // The VSP default settings are designed for person transport simulation, so the checking
+    // level is relaxed to WARN here.      (KMT may'23 after talking to Kai)
     controller
         .getConfig()
         .vspExperimental()
@@ -235,11 +236,18 @@ import org.matsim.vehicles.VehicleUtils;
     private final Random tipRandom;
     private double tipSum;
 
-    /*package-private*/ TipScorer() {
+    /**
+   * Example {@link LSPScorer} that awards a random tip (zero to five) every time a carrier finishes a
+   * service, and reports the accumulated tip sum as the plan score.
+   */
+  /*package-private*/ TipScorer() {
       tipRandom = new Random(1);
       tipSum = 0;
     }
 
+    /**
+   * @return the accumulated tips awarded since the last {@link #reset(int)}
+   */
     @Override
     public double getScoreForCurrentPlan() {
       return tipSum;
@@ -247,9 +255,14 @@ import org.matsim.vehicles.VehicleUtils;
 
     @Override
     public void setEmbeddingContainer(LSP pointer) {
-      // backpointer not needed here, therefor not memorizing it.  kai, jun'22
+      // The backpointer is not used in this example.
     }
 
+    /**
+   * Awards a random tip on every carrier service end and adds it to the running tip sum.
+   *
+   * @param event the carrier service end event that triggers the tip
+   */
     @Override
     public void handleEvent(CarrierServiceEndEvent event) {
       double tip = tipRandom.nextDouble() * 5;
@@ -257,6 +270,11 @@ import org.matsim.vehicles.VehicleUtils;
       tipSum += tip;
     }
 
+    /**
+   * Clears the accumulated tip sum before a new iteration.
+   *
+   * @param iteration the current planning iteration (ignored beyond the reset)
+   */
     @Override
     public void reset(int iteration) {
       tipSum = 0.;

@@ -46,8 +46,11 @@ import org.matsim.vehicles.VehicleUtils;
 import org.xml.sax.Attributes;
 
 /**
- * Reads data out of LSPPlans file and builds the LSPs with their according resources, shipments and
- * plans. StartTag mainly for parsing data, endTag for assigning data to according LSP.
+ * SAX parser that reads the V1 XSD format of an LSP plan definition file and builds the corresponding
+ * {@link LSP}s, each with its resources, shipments and plans.
+ * <p>
+ * The SAX lifecycle methods drive the build: {@link #startTag} accumulates the data of a single element
+ * into instance fields, and {@link #endTag} commits that data to the {@link LSP}s under construction.
  *
  * @author nrichter (Niclas Richter)
  */
@@ -263,7 +266,7 @@ class LSPPlanXmlParserV1 extends MatsimXmlParser {
 
         LspShipmentPlanElement planElement = null;
 
-        switch (type) {
+        switch (LspShipmentPlanElement.ElementType.valueOf(type)) {
 			case LOAD -> {
             var planElementBuilder = LspShipmentUtils.ScheduledShipmentLoadBuilder.newInstance();
             planElementBuilder.setStartTime(parseTimeToDouble(startTime));
@@ -392,19 +395,13 @@ class LSPPlanXmlParserV1 extends MatsimXmlParser {
 
         elementIdResourceIdMap.clear();
 
-        LogisticChain currentLogisticChain =
-            LSPUtils.LogisticChainBuilder.newInstance(Id.create(chainId, LogisticChain.class))
-                .addLogisticChainElement(logisticChainElements.getFirst())
-                .build();
-
-        for (int i = 1;
-            i < logisticChainElements.size();
-            i++) { // element 0 was already added in Builder as first element.
-          logisticChainElements.get(i - 1).connectWithNextElement(logisticChainElements.get(i));
-          currentLogisticChain.getLogisticChainElements().add(logisticChainElements.get(i));
+        // The builder connects the elements in the order in which they are added.
+        LSPUtils.LogisticChainBuilder chainBuilder =
+            LSPUtils.LogisticChainBuilder.newInstance(Id.create(chainId, LogisticChain.class));
+        for (LogisticChainElement logisticChainElement : logisticChainElements) {
+          chainBuilder.addLogisticChainElement(logisticChainElement);
         }
-
-        logisticChains.add(currentLogisticChain);
+        logisticChains.add(chainBuilder.build());
       }
 
       case SHIPMENT_PLAN -> {
