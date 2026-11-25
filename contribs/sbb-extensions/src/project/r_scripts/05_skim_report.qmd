@@ -1,0 +1,451 @@
+---
+title: "Skims Munich–Bavaria: PT (segmented) and car"
+subtitle: "Morning peak 07:30–08:30"
+format:
+  html:
+    embed-resources: true
+    page-layout: full
+    toc: false
+    theme: cosmo
+    fig-dpi: 110
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+#| include: false
+# Render with:  quarto render 05_skim_report.qmd
+# Data: run 04_prepare_report_data.R first (writes <skim_dir>/report_data/).
+report_data <- "C:/models/matsim-libs/contribs/sbb-extensions/src/project/output/skims_muc/report_data"
+
+suppressPackageStartupMessages({
+  library(data.table)
+  library(sf)
+  library(ggplot2)
+})
+
+MODES <- c("car", "bus", "btm", "all")
+PT_MODES <- c("bus", "btm", "all")
+MODE_LABELS <- c(car = "car", bus = "bus", btm = "bus + tram/metro", all = "bus + tram/metro + rail")
+MODE_COLORS <- c("car" = "#5f6b7a", "bus" = "#d95f02", "bus + tram/metro" = "#1b9e77", "bus + tram/metro + rail" = "#7570b3")
+DIST_BANDS <- c("intrazonal", "0-2 km", "2-5 km", "5-10 km", "10-25 km", "25-50 km", "50-100 km", ">100 km")
+mode_f <- function(m) factor(MODE_LABELS[m], levels = MODE_LABELS)
+
+meta <- fread(file.path(report_data, "meta.csv"), sep = ";")
+mget_meta <- function(k) meta[item == k, value]
+selected_zones <- trimws(strsplit(mget_meta("selected_zones"), ",")[[1]])
+
+# place names of the selected zones (zones not listed are shown with their number only)
+ZONE_NAMES <- c("2641" = "München-Moosach", "3441" = "München-Fürstenried West", "517" = "Augsburg",
+                "4405" = "Rosenheim", "3084" = "München-Maxvorstadt")
+zname <- function(z) ifelse(z %in% names(ZONE_NAMES), ZONE_NAMES[z], "")
+zlab <- function(z) ifelse(zname(z) == "", z, paste0(z, " ", zname(z)))
+
+od_sel <- fread(file.path(report_data, "od_selected.csv"), sep = ";", colClasses = list(character = c("from", "to")))
+od_sel[, dist_band := factor(dist_band, levels = DIST_BANDS)]
+od_sel[, mode_label := mode_f(mode)]
+
+per_origin <- fread(file.path(report_data, "per_origin.csv"), sep = ";", colClasses = list(character = "from"))
+per_origin[, mode_label := mode_f(mode)]
+
+smp <- fread(file.path(report_data, "od_sample.csv"), sep = ";", colClasses = list(character = c("from", "to")))
+smp[, dist_band := factor(dist_band, levels = DIST_BANDS)]
+
+bq <- fread(file.path(report_data, "band_quantiles.csv"), sep = ";")
+bq[, dist_band := factor(dist_band, levels = DIST_BANDS)]
+bq[, mode_label := mode_f(mode)]
+
+zones <- st_read(file.path(report_data, "zones.gpkg"), quiet = TRUE)
+pts_file <- file.path(report_data, "sampling_points.csv")
+pts <- if (file.exists(pts_file)) fread(pts_file, sep = ";", colClasses = list(character = "ZONE")) else NULL
+
+theme_set(theme_bw(base_size = 11))
+map_theme <- theme(axis.text = element_blank(), axis.ticks = element_blank(), panel.grid = element_blank(),
+                   strip.text = element_text(size = 11))
+
+map_theme <- map_theme + theme(legend.position = "right", legend.key.height = unit(1.6, "cm"), axis.title = element_blank(),
+                               plot.title = element_text(size = 14, face = "bold"), strip.text = element_text(size = 12, face = "bold"))
+zone_cent <- suppressWarnings(st_centroid(zones[zones$zone_id %in% selected_zones, ]))
+zone_cent$label <- zlab(zone_cent$zone_id)
+
+# box around a zone with the aspect ratio of the study area (so region and zoom maps have the same size)
+reg_bb <- unname(as.numeric(st_bbox(zones)))                     # xmin, ymin, xmax, ymax
+reg_aspect <- (reg_bb[4] - reg_bb[2]) / (reg_bb[3] - reg_bb[1])
+zoom_box <- function(z, half_width_m = 30000) {
+  c0 <- unname(as.numeric(st_coordinates(zone_cent[zone_cent$zone_id == z, ])[1, 1:2]))
+  c(xmin = c0[1] - half_width_m, xmax = c0[1] + half_width_m,
+    ymin = c0[2] - half_width_m * reg_aspect, ymax = c0[2] + half_width_m * reg_aspect)
+}
+
+# map of one value per zone, one facet per mode (2 x 2 grid so each map is large)
+#   highlight: origin zone (red outline + dot + name); box: zoom extent (xmin, xmax, ymin, ymax)
+facet_map <- function(values, fill_scale, title, highlight = NULL, ncol = 2, box = NULL, subtitle = NULL) {
+  m <- merge(zones, values, by = "zone_id")
+  p <- ggplot(m) + geom_sf(aes(fill = value), colour = if (is.null(box)) NA else "grey97", linewidth = 0.05) +
+    fill_scale + facet_wrap(~mode_label, ncol = ncol) +
+    labs(title = title, subtitle = subtitle, fill = NULL) + map_theme
+  if (!is.null(highlight)) {
+    o <- zone_cent[zone_cent$zone_id == highlight, ]
+    # origin: zone outline + hollow ring (no label: the name is in the title, a label would hide the map)
+    p <- p + geom_sf(data = zones[zones$zone_id == highlight, ], fill = NA, colour = "black", linewidth = 0.8) +
+      geom_sf(data = o, shape = 21, fill = NA, colour = "white", size = 5, stroke = 2.2) +
+      geom_sf(data = o, shape = 21, fill = NA, colour = "black", size = 5, stroke = 1)
+  }
+  if (!is.null(box)) p <- p + coord_sf(xlim = box[c("xmin", "xmax")], ylim = box[c("ymin", "ymax")], expand = FALSE)
+  p
+}
+
+# travel time: binned, short = red, long = blue, no connection = light grey
+tt_breaks <- c(15, 30, 45, 60, 90, 120, 180, 240)
+tt_scale <- scale_fill_fermenter(palette = "Spectral", direction = 1, breaks = tt_breaks, limits = c(0, 300),
+                                 oob = scales::squish, na.value = "grey90", name = "minutes",
+                                 guide = guide_coloursteps(show.limits = FALSE))
+share_scale <- function(opt = "viridis") scale_fill_viridis_c(option = opt, limits = c(0, 1), na.value = "grey90",
+                                                              breaks = seq(0, 1, 0.25))
+
+fmt <- function(x, d = 1) ifelse(is.na(x), "–", formatC(x, format = "f", digits = d))
+
+# start / end of a nested tabset inside an "asis" chunk
+tabset_start <- function() cat("\n\n::: {.panel-tabset}\n\n")
+tabset_end <- function() cat("\n\n:::\n\n")
+```
+
+::: {.panel-tabset}
+
+## About
+
+### What this report shows
+
+Zone-to-zone skims for **`r mget_meta("n_zones")` zones** (`r format(as.numeric(mget_meta("n_od_pairs")), big.mark = ",")` OD pairs),
+calculated with `CalculateSegmentedSkimsMuc` (written `r mget_meta("skims_written")`). Five zones can be inspected in detail:
+**`r paste(zlab(selected_zones), collapse = ", ")`**. Region-wide plots use all OD pairs (maps, box plots) or a random sample of
+`r format(as.numeric(mget_meta("sample_size")), big.mark = ",")` interzonal OD pairs (scatter plots).
+
+```{r overview-map}
+#| fig-width: 7
+#| fig-height: 5.2
+#| layout-ncol: 2
+sel <- zones[zones$zone_id %in% selected_zones, ]
+cent <- zone_cent
+xy <- st_coordinates(cent)
+cent$x <- xy[, 1]; cent$y <- xy[, 2]
+# zones in Munich are close together: show them in a separate zoom map
+in_muc <- grepl("^München", zname(cent$zone_id))
+ov_theme <- map_theme + theme(legend.position = "none", plot.title = element_text(size = 13, face = "bold"))
+
+if (any(in_muc)) {
+  # landscape window (same shape as the figure) around the Munich zones, wide enough for the labels
+  mx <- range(xy[in_muc, 1]); my <- range(xy[in_muc, 2])
+  half_h <- diff(my) / 2 + 2500
+  half_w <- max(diff(mx) / 2 + 9000, half_h / 0.74)
+  half_h <- half_w * 0.74
+  cx <- mean(mx); cy <- mean(my)
+  mb <- st_bbox(c(xmin = cx - half_w, ymin = cy - half_h, xmax = cx + half_w, ymax = cy + half_h), crs = st_crs(zones))
+  muc_box <- st_as_sfc(mb)
+}
+
+# left: whole study area
+p1 <- ggplot() + geom_sf(data = zones, fill = "grey93", colour = "grey85", linewidth = 0.05) +
+  geom_point(data = st_drop_geometry(cent), aes(x, y), shape = 21, fill = "red", colour = "white", size = 3.5, stroke = 0.8) +
+  geom_label(data = st_drop_geometry(cent[!in_muc, ]), aes(x, y, label = label), nudge_y = 7000, size = 3.6,
+             fill = "white", linewidth = 0.2) +
+  labs(title = "Study area") + ov_theme
+if (any(in_muc)) {
+  p1 <- p1 + geom_sf(data = muc_box, fill = NA, colour = "black", linewidth = 0.6) +
+    annotate("label", x = mb[["xmax"]], y = mb[["ymax"]], label = "München (see right)", hjust = 0, vjust = 0,
+             size = 3.6, fill = "white", linewidth = 0.2)
+}
+p1 <- p1 + coord_sf(expand = TRUE)
+print(p1)
+
+# right: Munich zoom with the city zones and their names
+if (any(in_muc)) {
+  cm <- st_drop_geometry(cent[in_muc, ])
+  cm <- cm[order(-cm$y), ]
+  # spread the labels: northernmost above, southernmost below, the others to the right
+  cm$nx <- 0; cm$ny <- 0; cm$hj <- 0.5
+  cm$ny[1] <- 900
+  if (nrow(cm) > 1) cm$ny[nrow(cm)] <- -900
+  if (nrow(cm) > 2) { mid <- 2:(nrow(cm) - 1); cm$nx[mid] <- 700; cm$hj[mid] <- 0 }
+  p2 <- ggplot() + geom_sf(data = st_crop(zones, mb), fill = "grey95", colour = "grey75", linewidth = 0.1) +
+    geom_sf(data = sel[sel$zone_id %in% cm$zone_id, ], fill = "#fcbba1", colour = "red", linewidth = 0.8) +
+    geom_point(data = cm, aes(x, y), shape = 21, fill = "red", colour = "white", size = 3, stroke = 0.8) +
+    geom_label(data = cm, aes(x + nx, y + ny, label = label, hjust = hj), size = 3.6, fill = "white", linewidth = 0.2) +
+    coord_sf(xlim = unname(c(mb[["xmin"]], mb[["xmax"]])), ylim = unname(c(mb[["ymin"]], mb[["ymax"]])), expand = FALSE) +
+    labs(title = "München") + ov_theme
+  print(p2)
+}
+```
+
+### Skims
+
+| Skim | Network / schedule | Main mode | Feeder modes |
+|---|---|---|---|
+| car | car network, free-flow speed | car | – |
+| bus | bus (+ ferry) | bus, ferry | – |
+| bus + tram/metro | bus + tram + U-Bahn | tram, U-Bahn | bus, ferry |
+| bus + tram/metro + rail | all PT | rail (S-Bahn, regional trains) | bus, ferry, tram, U-Bahn |
+
+### Settings
+
+| Setting | Value |
+|---|---|
+| Departure window (PT) | 07:30–08:30; routing trees every 120 s from 06:30 to 09:30 |
+| Sampling points | 3 per zone; all skims use the same points |
+| Walking | 3 km/h, straight-line distance × 1.3 |
+| Stop search radius | 1,000 m (+200 m if no stop is found) |
+| Max. transfer walk | 500 m straight-line |
+| Car | free-flow speeds (no congestion) |
+
+### Definitions
+
+| Term | Meaning |
+|---|---|
+| Total travel time | door to door: walk access + in-vehicle time + transfer walk + transfer wait + walk egress. Waiting at the first stop is **not** included (it is in the adaption time). |
+| PT access / main / egress | in-vehicle time before the first main-mode leg / from the first to the last main-mode leg / after the last main-mode leg |
+| Main share | in-vehicle time on the main segment ÷ total in-vehicle time. 1 = no feeder legs. |
+| Availability | share of the hour (and of the 3 × 3 point pairs) in which the best connection uses the main mode. **Car:** 1 if the car time is finite, 0 otherwise. |
+| Share reachable | per origin zone: share of all other zones with a finite travel time |
+| No connection (`Infinity`) | no connection using the main mode at all. Shown in grey on maps and as "–" in tables. |
+| Door-to-door speed | straight-line distance ÷ total travel time |
+
+Note: for very short and intrazonal trips the PT values are unreliable (stops near the destination are reached "walking only" and are skipped by the router). Use the walk skim for those.
+
+### Overall
+
+```{r overall}
+ov <- per_origin[, .(`share reachable` = fmt(mean(share_reachable) * 100, 1),
+                     `mean availability` = fmt(mean(mean_availability), 2),
+                     `median main share` = fmt(median(median_main_share, na.rm = TRUE), 2),
+                     `median travel time [min]` = fmt(median(median_tt_min, na.rm = TRUE), 0)), by = mode_label][order(mode_label)]
+setnames(ov, c("mode_label", "share reachable"), c("mode", "share of OD pairs reachable [%]"))
+knitr::kable(ov, align = "lrrrr")
+```
+
+## Zone explorer
+
+```{r zone-explorer}
+#| results: asis
+#| fig-width: 13
+#| fig-height: 5
+COMP <- c(walk_access_time = "walk access", pt_access_ivt = "PT access (feeder)", pt_main_ivt = "PT main",
+          pt_egress_ivt = "PT egress (feeder)", pt_transfer_walk_time = "transfer walk",
+          pt_transfer_wait_time = "transfer wait", walk_egress_time = "walk egress", car = "car")
+COMP_COLORS <- c("walk access" = "#bdbdbd", "PT access (feeder)" = "#fdae6b", "PT main" = "#3182bd",
+                 "PT egress (feeder)" = "#fd8d3c", "transfer walk" = "#a1d99b", "transfer wait" = "#e7ba52",
+                 "walk egress" = "#737373", "car" = "#5f6b7a")
+
+tabset_start()
+for (z in selected_zones) {
+  cat("\n\n### ", zlab(z), "\n\n", sep = "")
+  dz <- od_sel[from == z & to %in% selected_zones]
+  dz[, to := factor(to, levels = c(z, setdiff(selected_zones, z)))]
+
+  # --- table
+  tab <- dz[order(to, mode_label), .(
+    to = zlab(as.character(to)), mode = as.character(mode_label), `beeline km` = fmt(beeline / 1000, 1),
+    `total min` = fmt(total_travel_time / 60, 1), `walk acc` = fmt(walk_access_time / 60, 1),
+    `PT acc` = fmt(pt_access_ivt / 60, 1), `PT main` = fmt(pt_main_ivt / 60, 1), `PT egr` = fmt(pt_egress_ivt / 60, 1),
+    `walk egr` = fmt(walk_egress_time / 60, 1), `trf walk` = fmt(pt_transfer_walk_time / 60, 1),
+    `trf wait` = fmt(pt_transfer_wait_time / 60, 1), transfers = fmt(pt_transfer_count, 2),
+    `main share` = fmt(main_share_time, 2), availability = fmt(main_mode_availability, 2),
+    `freq /h` = fmt(pt_frequency, 1), `dist km` = fmt(total_distance / 1000, 1))]
+  cat("**Travel times from ", zlab(z), " to the other selected zones** (minutes; first row group: intrazonal)\n\n", sep = "")
+  cat(knitr::kable(tab, format = "html", align = "llrrrrrrrrrrrrrr", table.attr = "class=\"table table-sm table-striped\""), sep = "\n")
+
+  # --- stacked components
+  long <- melt(dz[mode != "car", c("to", "mode_label", names(COMP)[1:7]), with = FALSE],
+               id.vars = c("to", "mode_label"), variable.name = "component", value.name = "sec")
+  car <- dz[mode == "car", .(to, mode_label, component = "car", sec = total_travel_time)]
+  long <- rbind(long, car)
+  long[, component := factor(COMP[as.character(component)], levels = COMP)]
+  long[, minutes := sec / 60]
+  nocon <- dz[is.na(total_travel_time), .(to, mode_label)]
+  p <- ggplot(long[!is.na(minutes)], aes(x = minutes, y = to, fill = component)) +
+    geom_col(width = 0.7) +
+    facet_wrap(~mode_label, nrow = 1) +
+    scale_fill_manual(values = COMP_COLORS, drop = FALSE) + scale_y_discrete(labels = zlab) +
+    labs(x = "minutes", y = "destination zone", fill = NULL, title = paste0("Travel time components from ", zlab(z)),
+         subtitle = "missing bar = no connection with the main mode") +
+    theme(legend.position = "bottom")
+  if (nrow(nocon) > 0) p <- p + geom_text(data = nocon, aes(x = 0, y = to, label = "no connection"), inherit.aes = FALSE,
+                                          hjust = 0, size = 3, colour = "grey40")
+  print(p)
+  cat("\n\n")
+
+  # --- location
+  zz <- zones[zones$zone_id == z, ]
+  box <- st_bbox(st_buffer(zz, 3000))
+  nb <- st_crop(zones, box)
+  pz <- ggplot() + geom_sf(data = nb, fill = "grey95", colour = "grey70", linewidth = 0.2) +
+    geom_sf(data = zz, fill = "#fde0dd", colour = "red", linewidth = 0.8) +
+    coord_sf(xlim = box[c(1, 3)], ylim = box[c(2, 4)], expand = FALSE) +
+    labs(title = paste0(zlab(z), " and its sampling points"), x = NULL, y = NULL) + map_theme
+  if (!is.null(pts)) {
+    pp <- st_as_sf(pts[ZONE == z], coords = c("X", "Y"), crs = st_crs(zones))
+    pz <- pz + geom_sf(data = pp, colour = "black", size = 2.5) +
+      geom_sf_text(data = pp, aes(label = POINT_INDEX), nudge_y = 150, size = 3)
+  }
+  print(pz)
+  cat("\n\n")
+}
+tabset_end()
+```
+
+## Connectivity maps
+
+```{r connectivity}
+#| results: asis
+#| fig-width: 12
+#| fig-height: 8.6
+cat("Maps per origin zone: **travel time** (whole area and a 60 km zoom around the origin), **availability** of the main mode and",
+    "**main share**. The origin is marked red. Light grey = no connection with the main mode.\n\n")
+tabset_start()
+for (z in selected_zones) {
+  cat("\n\n### From ", zlab(z), "\n\n", sep = "")
+  dz <- od_sel[from == z, .(zone_id = to, mode, mode_label, tt = total_travel_time / 60,
+                            avail = main_mode_availability, share = main_share_time)]
+  tt_vals <- dz[, .(zone_id, mode_label, value = tt)]
+  print(facet_map(tt_vals, tt_scale, paste0("Total travel time from ", zlab(z)), highlight = z,
+                  subtitle = "whole study area"))
+  cat("\n\n")
+  print(facet_map(tt_vals, tt_scale, paste0("Total travel time from ", zlab(z), " (zoom)"), highlight = z,
+                  box = zoom_box(z), subtitle = "60 km wide window around the origin"))
+  cat("\n\n")
+  print(facet_map(dz[, .(zone_id, mode_label, value = avail)], share_scale("viridis"),
+                  paste0("Availability of the main mode from ", zlab(z)), highlight = z,
+                  subtitle = "share of the hour (and of the sampling-point pairs) served by the main mode; car: 1 = reachable"))
+  cat("\n\n")
+  print(facet_map(dz[mode != "car", .(zone_id, mode_label, value = share)], share_scale("cividis"),
+                  paste0("Main share from ", zlab(z)), highlight = z,
+                  subtitle = "in-vehicle time on the main mode / total in-vehicle time (car: not applicable)"))
+  cat("\n\n")
+}
+
+cat("\n\n### Region-wide (all origins)\n\n")
+cat("One value per **origin** zone, over all destinations (interzonal).\n\n")
+po <- per_origin[, .(zone_id = from, mode_label, share_reachable, mean_availability, median_main_share)]
+print(facet_map(po[, .(zone_id, mode_label, value = share_reachable)], share_scale("viridis"),
+                "Share of destinations reachable", subtitle = "per origin zone"))
+cat("\n\n")
+print(facet_map(po[, .(zone_id, mode_label, value = mean_availability)], share_scale("viridis"),
+                "Mean availability of the main mode", subtitle = "per origin zone; car: = share reachable"))
+cat("\n\n")
+print(facet_map(po[mode_label != "car", .(zone_id, mode_label, value = median_main_share)], share_scale("cividis"),
+                "Median main share over reachable destinations", subtitle = "per origin zone; car: not applicable"))
+cat("\n\n")
+tabset_end()
+```
+
+## Speed by mode
+
+```{r speed}
+#| results: asis
+#| fig-width: 13
+#| fig-height: 5.5
+spd_q <- bq[measure == "d2d_speed_kmh"]
+long_smp <- melt(smp, id.vars = c("from", "to", "beeline", "dist_band", "walk_time"),
+                 measure.vars = paste0(MODES, "_tt"), variable.name = "mode", value.name = "tt")
+long_smp[, mode := sub("_tt$", "", mode)][, mode_label := mode_f(mode)]
+walk_k <- smp[beeline > 0, median(walk_time / beeline)] * 1000 / 60   # min per km
+y_max <- quantile(long_smp$tt / 60, 0.995, na.rm = TRUE)
+
+tabset_start()
+for (z in selected_zones) {
+  cat("\n\n### ", zlab(z), "\n\n", sep = "")
+  dz <- od_sel[from == z & intrazonal == FALSE & !is.na(total_travel_time) & total_travel_time > 0]
+  dz[, speed := beeline / total_travel_time * 3.6]
+
+  p <- ggplot(spd_q, aes(x = dist_band, fill = mode_label)) +
+    geom_boxplot(aes(ymin = p05, lower = p25, middle = p50, upper = p75, ymax = p95), stat = "identity",
+                 position = position_dodge(width = 0.85), width = 0.75, alpha = 0.7) +
+    geom_point(data = dz, aes(x = dist_band, y = speed, colour = mode_label),
+               position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.85), size = 0.6, alpha = 0.5,
+               inherit.aes = FALSE, show.legend = FALSE) +
+    scale_fill_manual(values = MODE_COLORS) + scale_colour_manual(values = MODE_COLORS) +
+    labs(x = "beeline distance band", y = "door-to-door speed [km/h]", fill = NULL,
+         title = "Door-to-door speed by distance band",
+         subtitle = paste0("boxes: all OD pairs (whiskers 5 %–95 %); dots: OD pairs from ", zlab(z))) +
+    theme(legend.position = "bottom")
+  print(p)
+  cat("\n\n")
+
+  p <- ggplot(long_smp[!is.na(tt)], aes(beeline / 1000, tt / 60)) +
+    geom_point(colour = "grey70", size = 0.3, alpha = 0.3) +
+    geom_abline(slope = walk_k, intercept = 0, colour = "black", linetype = "dashed") +
+    geom_point(data = dz, aes(beeline / 1000, total_travel_time / 60, colour = mode_label), size = 0.8, alpha = 0.7,
+               inherit.aes = FALSE, show.legend = FALSE) +
+    facet_wrap(~mode_label, nrow = 1) +
+    scale_colour_manual(values = MODE_COLORS) +
+    coord_cartesian(ylim = c(0, y_max)) +
+    labs(x = "beeline distance [km]", y = "total travel time [min]",
+         title = "Travel time vs beeline distance",
+         subtitle = paste0("grey: random sample of all OD pairs; coloured: OD pairs from ", zlab(z), "; dashed: walking"))
+  print(p)
+  cat("\n\n")
+}
+tabset_end()
+```
+
+## PT vs car
+
+```{r pt-vs-car}
+#| results: asis
+#| fig-width: 13
+#| fig-height: 5.5
+ratio_q <- bq[measure == "pt_car_ratio"]
+car_sel <- od_sel[mode == "car", .(from, to, car_tt = total_travel_time)]
+pc_smp <- melt(smp[!is.na(car_tt) & car_tt > 0], id.vars = c("from", "to", "dist_band", "car_tt"),
+               measure.vars = paste0(PT_MODES, "_tt"), variable.name = "mode", value.name = "pt_tt")
+pc_smp[, mode := sub("_tt$", "", mode)][, mode_label := mode_f(mode)]
+lim <- c(0, quantile(c(pc_smp$pt_tt, pc_smp$car_tt) / 60, 0.995, na.rm = TRUE))
+
+cat("Ratio = PT total travel time ÷ car travel time (free flow). Below 1: PT faster than car.\n\n")
+rt <- dcast(ratio_q, dist_band ~ mode_label, value.var = "p50")
+rt <- rt[, lapply(.SD, function(x) if (is.numeric(x)) fmt(x, 2) else as.character(x))]
+cat("**Median PT / car ratio by distance band (all OD pairs)**\n\n")
+cat(knitr::kable(rt, format = "html", table.attr = "class=\"table table-sm\""), sep = "\n")
+
+tabset_start()
+for (z in selected_zones) {
+  cat("\n\n### ", zlab(z), "\n\n", sep = "")
+  dz <- merge(od_sel[from == z & mode != "car" & intrazonal == FALSE, .(from, to, dist_band, mode_label, pt_tt = total_travel_time)],
+              car_sel, by = c("from", "to"))
+  dz <- dz[!is.na(pt_tt) & !is.na(car_tt) & car_tt > 0]
+  dz[, ratio := pt_tt / car_tt]
+
+  p <- ggplot(ratio_q, aes(x = dist_band, fill = mode_label)) +
+    geom_hline(yintercept = 1, colour = "red") +
+    geom_boxplot(aes(ymin = p05, lower = p25, middle = p50, upper = p75, ymax = p95), stat = "identity",
+                 position = position_dodge(width = 0.85), width = 0.75, alpha = 0.7) +
+    geom_point(data = dz, aes(x = dist_band, y = ratio, colour = mode_label),
+               position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.85), size = 0.6, alpha = 0.5,
+               inherit.aes = FALSE, show.legend = FALSE) +
+    scale_y_log10() +
+    scale_fill_manual(values = MODE_COLORS) + scale_colour_manual(values = MODE_COLORS) +
+    labs(x = "beeline distance band", y = "PT time / car time (log scale)", fill = NULL,
+         title = "PT vs car by distance band",
+         subtitle = paste0("boxes: all OD pairs (whiskers 5 %–95 %); dots: OD pairs from ", zlab(z), "; red: equal time")) +
+    theme(legend.position = "bottom")
+  print(p)
+  cat("\n\n")
+
+  p <- ggplot(pc_smp[!is.na(pt_tt)], aes(car_tt / 60, pt_tt / 60)) +
+    geom_point(colour = "grey70", size = 0.3, alpha = 0.3) +
+    geom_abline(slope = 1, intercept = 0, colour = "red") +
+    geom_point(data = dz, aes(car_tt / 60, pt_tt / 60, colour = mode_label), size = 0.8, alpha = 0.7,
+               inherit.aes = FALSE, show.legend = FALSE) +
+    facet_wrap(~mode_label, nrow = 1) +
+    scale_colour_manual(values = MODE_COLORS) +
+    coord_cartesian(xlim = lim, ylim = lim) +
+    labs(x = "car travel time [min]", y = "PT travel time [min]", title = "PT vs car travel time",
+         subtitle = paste0("grey: random sample of all OD pairs; coloured: OD pairs from ", zlab(z), "; above the red line: car faster"))
+  print(p)
+  cat("\n\n")
+}
+tabset_end()
+```
+
+:::
